@@ -287,12 +287,3 @@ class AgentPolicy:
                 continue
 
         return None
-
-
-# JSON repair prompt for LLM-based repair (optional, not used in basic implementation)
-JSON_REPAIR_PROMPT = """The following text should be a JSON object but has syntax errors.
-Please fix it and return ONLY the corrected JSON, nothing else:
-
-{text}
-
-Corrected JSON:"""

@@ -1,18 +1,11 @@
 """Base plugin interface and data structures"""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from dataclasses import dataclass
+from typing import Any, List
 
-
-@dataclass
-class ValidationResult:
-    """Result of answer validation against ground truth"""
-    score: float  # 0.0 - 1.0
-    is_correct: bool
-    expected: Any
-    actual: Any
-    details: str
+# Import ValidationResult from validators to avoid duplication
+from ..core.validators.base import ValidationResult
 
 
 @dataclass

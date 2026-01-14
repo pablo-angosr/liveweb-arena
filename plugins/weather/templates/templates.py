@@ -1,0 +1,435 @@
+"""Weather question templates for wttr.in"""
+
+import random
+from typing import Any, Dict, List, Optional
+
+import httpx
+
+from plugins.templates.base import QuestionTemplate, GeneratedQuestion, ValidationResult
+from plugins.templates.validators import NumericToleranceValidator, BooleanValidator, ExactMatchValidator
+from plugins.weather.templates.variables import (
+    LocationVariable, DateVariable, WeatherMetricVariable,
+    LocationType, DateType, MetricType,
+    LocationSpec, DateSpec, MetricSpec,
+)
+
+
+class LocationNameWeatherTemplate(QuestionTemplate):
+    """
+    Question template for location name-based weather queries.
+
+    Examples:
+    - What is the temperature in Washington tomorrow?
+    - How windy will it be in Berlin next Monday?
+    - Will it rain in New York in the next 3 days?
+    """
+
+    # Question patterns with placeholders
+    QUESTION_PATTERNS = [
+        # Temperature questions
+        "What is the {metric} in {location} {date}?",
+        "What will be the {metric} in {location} {date}?",
+        "How hot/cold will it be in {location} {date}?",
+
+        # Numeric metric questions
+        "What is the {metric} in {location} {date}?",
+        "How much {metric} will there be in {location} {date}?",
+
+        # Boolean questions
+        "Will it rain in {location} {date}?",
+        "Is there a chance of rain in {location} {date}?",
+    ]
+
+    QUESTION_PATTERNS_ZH = [
+        "{location}{date}的{metric}是多少？",
+        "{date}{location}的{metric}会是多少？",
+        "{location}{date}会下雨吗？",
+        "{date}{location}的天气怎么样？",
+    ]
+
+    def __init__(
+        self,
+        use_chinese: bool = False,
+        allowed_metrics: List[MetricType] = None,
+        regions: List[str] = None,
+    ):
+        """
+        Initialize location name weather template.
+
+        Args:
+            use_chinese: Use Chinese question patterns
+            allowed_metrics: Metrics to use (default: temperature, wind, rain)
+            regions: Geographic regions to sample cities from
+        """
+        super().__init__("location_name_weather")
+        self.use_chinese = use_chinese
+
+        # Register variables
+        self.register_variable(LocationVariable(
+            allowed_types=[LocationType.CITY_NAME],  # Only city names for this template
+            regions=regions,
+        ))
+        self.register_variable(DateVariable(
+            max_forecast_days=7,
+            use_chinese=use_chinese,
+        ))
+        self.register_variable(WeatherMetricVariable(
+            allowed_metrics=allowed_metrics or [
+                MetricType.TEMPERATURE,
+                MetricType.TEMPERATURE_HIGH,
+                MetricType.TEMPERATURE_LOW,
+                MetricType.WIND_SPEED,
+                MetricType.HUMIDITY,
+                MetricType.PRECIPITATION_CHANCE,
+                MetricType.HAS_RAIN,
+            ]
+        ))
+
+        # Register validators for each metric type
+        self._setup_validators()
+
+    def _setup_validators(self):
+        """Setup validators for each metric type"""
+        # Numeric metrics with tolerance
+        for metric_type in [
+            MetricType.TEMPERATURE, MetricType.TEMPERATURE_HIGH,
+            MetricType.TEMPERATURE_LOW, MetricType.FEELS_LIKE,
+        ]:
+            spec = WeatherMetricVariable.METRICS[metric_type]
+            self.register_validator(
+                metric_type.value,
+                NumericToleranceValidator(
+                    full_tolerance=spec.full_tolerance,
+                    partial_tolerance=spec.partial_tolerance,
+                    unit=spec.unit,
+                )
+            )
+
+        for metric_type in [
+            MetricType.HUMIDITY, MetricType.WIND_SPEED,
+            MetricType.PRECIPITATION_CHANCE, MetricType.CLOUD_COVER,
+        ]:
+            spec = WeatherMetricVariable.METRICS[metric_type]
+            self.register_validator(
+                metric_type.value,
+                NumericToleranceValidator(
+                    full_tolerance=spec.full_tolerance,
+                    partial_tolerance=spec.partial_tolerance,
+                    unit=spec.unit,
+                )
+            )
+
+        # Boolean validator for rain questions
+        self.register_validator(
+            MetricType.HAS_RAIN.value,
+            BooleanValidator()
+        )
+
+        # Exact match for conditions
+        self.register_validator(
+            MetricType.CONDITION.value,
+            ExactMatchValidator(case_sensitive=False)
+        )
+
+    def generate(self, seed: int) -> GeneratedQuestion:
+        """Generate a weather question using the given seed"""
+        rng = random.Random(seed)
+
+        # Sample variables
+        location_var = self._variables["location"]
+        date_var = self._variables["date"]
+        metric_var = self._variables["metric"]
+
+        location: LocationSpec = location_var.sample(rng)
+        date: DateSpec = date_var.sample(rng)
+        metric: MetricSpec = metric_var.sample(rng)
+
+        # Build question text
+        question_text = self._build_question(location, date, metric, rng)
+
+        # Build start URL
+        start_url = f"https://wttr.in/{location.api_query}"
+
+        # Build validation info
+        validation_info = {
+            "location": location.api_query,
+            "date": date.api_date,
+            "forecast_day": date.forecast_day,
+            "metric_type": metric.metric_type.value,
+            "api_field": metric.api_field,
+            "is_boolean": metric.is_boolean,
+            "full_tolerance": metric.full_tolerance,
+            "partial_tolerance": metric.partial_tolerance,
+            "unit": metric.unit,
+        }
+
+        return GeneratedQuestion(
+            question_text=question_text,
+            start_url=start_url,
+            variables={
+                "location": location,
+                "date": date,
+                "metric": metric,
+            },
+            validation_info=validation_info,
+            template_name=self.name,
+        )
+
+    def _build_question(
+        self,
+        location: LocationSpec,
+        date: DateSpec,
+        metric: MetricSpec,
+        rng: random.Random,
+    ) -> str:
+        """Build natural language question"""
+        patterns = self.QUESTION_PATTERNS_ZH if self.use_chinese else self.QUESTION_PATTERNS
+
+        # Select appropriate pattern based on metric type
+        if metric.is_boolean:
+            # Use boolean question patterns
+            if self.use_chinese:
+                pattern = "{location}{date}会下雨吗？"
+            else:
+                pattern = rng.choice([
+                    "Will it rain in {location} {date}?",
+                    "Is there a chance of rain in {location} {date}?",
+                ])
+        else:
+            # Use regular metric question patterns
+            if self.use_chinese:
+                pattern = "{location}{date}的{metric}是多少？"
+            else:
+                pattern = rng.choice([
+                    "What is the {metric} in {location} {date}?",
+                    "What will the {metric} be in {location} {date}?",
+                ])
+
+        return pattern.format(
+            location=location.display_name,
+            date=date.display_text,
+            metric=metric.display_name,
+        )
+
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Any:
+        """Fetch ground truth from wttr.in API"""
+        location = validation_info["location"]
+        forecast_day = validation_info["forecast_day"]
+        api_field = validation_info["api_field"]
+        is_boolean = validation_info.get("is_boolean", False)
+
+        url = f"https://wttr.in/{location}?format=j1"
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            data = response.json()
+
+        # Extract value based on forecast day
+        if forecast_day == 0:
+            # Current conditions
+            current = data.get("current_condition", [{}])[0]
+            value = current.get(api_field)
+
+            # If not in current, check today's forecast
+            if value is None:
+                weather = data.get("weather", [{}])
+                if weather:
+                    value = weather[0].get(api_field)
+        else:
+            # Future forecast
+            weather = data.get("weather", [])
+            if forecast_day < len(weather):
+                day_data = weather[forecast_day]
+                value = day_data.get(api_field)
+
+                # Some fields are in hourly data
+                if value is None:
+                    hourly = day_data.get("hourly", [])
+                    if hourly:
+                        # Average over hourly values
+                        values = [float(h.get(api_field, 0)) for h in hourly if h.get(api_field)]
+                        if values:
+                            value = sum(values) / len(values)
+            else:
+                value = None
+
+        # Convert boolean for rain questions
+        if is_boolean and value is not None:
+            # Chance of rain > 30% means "will rain"
+            value = float(value) > 30
+
+        return value
+
+    async def validate_answer(
+        self,
+        answer: str,
+        validation_info: Dict[str, Any]
+    ) -> ValidationResult:
+        """Validate answer against real-time ground truth"""
+        try:
+            ground_truth = await self.get_ground_truth(validation_info)
+        except Exception as e:
+            return ValidationResult(
+                score=0.0,
+                is_correct=False,
+                expected=None,
+                actual=answer,
+                details=f"Failed to get ground truth: {e}",
+            )
+
+        # Get appropriate validator
+        metric_type = validation_info["metric_type"]
+        validator = self._validators.get(metric_type)
+
+        if validator is None:
+            # Default to numeric tolerance
+            validator = NumericToleranceValidator(
+                full_tolerance=validation_info.get("full_tolerance", 2),
+                partial_tolerance=validation_info.get("partial_tolerance", 5),
+                unit=validation_info.get("unit", ""),
+            )
+
+        return validator.validate(answer, ground_truth)
+
+
+class MultiDayWeatherTemplate(QuestionTemplate):
+    """
+    Question template for multi-day weather queries.
+
+    Examples:
+    - Will it rain in New York in the next 3 days?
+    - What is the average temperature in London this week?
+    """
+
+    def __init__(self, use_chinese: bool = False):
+        super().__init__("multi_day_weather")
+        self.use_chinese = use_chinese
+
+        # Register variables
+        self.register_variable(LocationVariable(
+            allowed_types=[LocationType.CITY_NAME],
+        ))
+        self.register_variable(WeatherMetricVariable(
+            allowed_metrics=[
+                MetricType.HAS_RAIN,
+                MetricType.TEMPERATURE_HIGH,
+                MetricType.TEMPERATURE_LOW,
+            ]
+        ))
+
+        # Register validators
+        self.register_validator(
+            MetricType.HAS_RAIN.value,
+            BooleanValidator()
+        )
+
+    def generate(self, seed: int) -> GeneratedQuestion:
+        """Generate a multi-day weather question"""
+        rng = random.Random(seed)
+
+        location_var = self._variables["location"]
+        metric_var = self._variables["metric"]
+
+        location: LocationSpec = location_var.sample(rng)
+        metric: MetricSpec = metric_var.sample(rng)
+
+        # Sample number of days (2-5)
+        num_days = rng.randint(2, 5)
+
+        # Build question
+        if metric.is_boolean:
+            if self.use_chinese:
+                question_text = f"{location.display_name}未来{num_days}天会下雨吗？"
+            else:
+                question_text = f"Will it rain in {location.display_name} in the next {num_days} days?"
+        else:
+            if self.use_chinese:
+                question_text = f"{location.display_name}未来{num_days}天的{metric.display_name}如何？"
+            else:
+                question_text = f"What is the {metric.display_name} in {location.display_name} over the next {num_days} days?"
+
+        start_url = f"https://wttr.in/{location.api_query}"
+
+        validation_info = {
+            "location": location.api_query,
+            "num_days": num_days,
+            "metric_type": metric.metric_type.value,
+            "api_field": metric.api_field,
+            "is_boolean": metric.is_boolean,
+        }
+
+        return GeneratedQuestion(
+            question_text=question_text,
+            start_url=start_url,
+            variables={
+                "location": location,
+                "metric": metric,
+                "num_days": num_days,
+            },
+            validation_info=validation_info,
+            template_name=self.name,
+        )
+
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Any:
+        """Fetch ground truth for multi-day query"""
+        location = validation_info["location"]
+        num_days = validation_info["num_days"]
+        api_field = validation_info["api_field"]
+        is_boolean = validation_info.get("is_boolean", False)
+
+        url = f"https://wttr.in/{location}?format=j1"
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            data = response.json()
+
+        weather = data.get("weather", [])
+
+        if is_boolean:
+            # Check if any day has rain
+            for i in range(min(num_days, len(weather))):
+                day = weather[i]
+                hourly = day.get("hourly", [])
+                for h in hourly:
+                    chance = float(h.get("chanceofrain", 0))
+                    if chance > 30:
+                        return True
+            return False
+        else:
+            # Return average value
+            values = []
+            for i in range(min(num_days, len(weather))):
+                val = weather[i].get(api_field)
+                if val is not None:
+                    values.append(float(val))
+            return sum(values) / len(values) if values else None
+
+    async def validate_answer(
+        self,
+        answer: str,
+        validation_info: Dict[str, Any]
+    ) -> ValidationResult:
+        """Validate answer for multi-day query"""
+        try:
+            ground_truth = await self.get_ground_truth(validation_info)
+        except Exception as e:
+            return ValidationResult(
+                score=0.0,
+                is_correct=False,
+                expected=None,
+                actual=answer,
+                details=f"Failed to get ground truth: {e}",
+            )
+
+        metric_type = validation_info["metric_type"]
+        validator = self._validators.get(metric_type)
+
+        if validator is None:
+            if validation_info.get("is_boolean"):
+                validator = BooleanValidator()
+            else:
+                validator = NumericToleranceValidator(2, 5, "°C")
+
+        return validator.validate(answer, ground_truth)

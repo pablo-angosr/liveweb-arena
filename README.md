@@ -38,7 +38,10 @@ asyncio.run(main())
 ## Installation
 
 ```bash
-pip install -r requirements.txt
+# Install as editable package
+pip install -e .
+
+# Install Playwright browsers
 playwright install chromium
 ```
 

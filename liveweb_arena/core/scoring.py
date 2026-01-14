@@ -3,8 +3,8 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from core.models import CompositeTask
-from plugins.base import BasePlugin, ValidationResult
+from .models import CompositeTask
+from ..plugins.base import BasePlugin, ValidationResult
 
 
 @dataclass

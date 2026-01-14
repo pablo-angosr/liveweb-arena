@@ -5,9 +5,9 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from plugins.templates.base import QuestionTemplate, GeneratedQuestion, ValidationResult
-from plugins.templates.validators import NumericToleranceValidator, BooleanValidator, ExactMatchValidator
-from plugins.weather.templates.variables import (
+from ...templates.base import QuestionTemplate, GeneratedQuestion, ValidationResult
+from ...templates.validators import NumericToleranceValidator, BooleanValidator, ExactMatchValidator
+from .variables import (
     LocationVariable, DateVariable, WeatherMetricVariable,
     LocationType, DateType, MetricType,
     LocationSpec, DateSpec, MetricSpec,

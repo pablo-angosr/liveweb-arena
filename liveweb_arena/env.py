@@ -3,23 +3,18 @@
 import asyncio
 import os
 import random
-import sys
 import time
 from typing import Dict, List, Optional, Type
 
-# Add /app to path to import local modules in container
-if '/app' not in sys.path:
-    sys.path.insert(0, '/app')
-
-from core.browser import BrowserEngine
-from core.task_manager import TaskManager
-from core.agent_policy import AgentPolicy
-from core.agent_loop import AgentLoop
-from core.parser import AnswerParser
-from plugins.base import BasePlugin
-from plugins.weather import WeatherPlugin
-from plugins.templates.llm_validator import validate_answers_with_llm
-from utils.llm_client import LLMClient
+from .core.browser import BrowserEngine
+from .core.task_manager import TaskManager
+from .core.agent_policy import AgentPolicy
+from .core.agent_loop import AgentLoop
+from .core.parser import AnswerParser
+from .plugins.base import BasePlugin
+from .plugins.weather import WeatherPlugin
+from .plugins.templates.llm_validator import validate_answers_with_llm
+from .utils.llm_client import LLMClient
 
 
 class Actor:
@@ -281,7 +276,7 @@ class Actor:
         Returns:
             List of conversation turns with role, content, and metadata
         """
-        from core.models import CompositeTask, TrajectoryStep
+        from .core.models import CompositeTask, TrajectoryStep
 
         conversation = []
 

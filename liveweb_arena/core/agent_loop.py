@@ -2,10 +2,10 @@
 
 from typing import Any, List, Optional, Tuple
 
-from core.browser import BrowserSession
-from core.models import BrowserAction, BrowserObservation, CompositeTask, TrajectoryStep
-from core.agent_policy import AgentPolicy
-from utils.llm_client import LLMClient
+from .browser import BrowserSession
+from .models import BrowserAction, BrowserObservation, CompositeTask, TrajectoryStep
+from .agent_policy import AgentPolicy
+from ..utils.llm_client import LLMClient
 
 
 class AgentLoop:

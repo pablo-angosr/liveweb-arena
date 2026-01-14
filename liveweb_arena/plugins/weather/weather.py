@@ -3,9 +3,9 @@
 import random
 from typing import Dict, List, Type
 
-from plugins.base import BasePlugin, SubTask, ValidationResult
-from plugins.templates.base import QuestionTemplate, GeneratedQuestion
-from plugins.weather.templates.templates import (
+from ..base import BasePlugin, SubTask, ValidationResult
+from ..templates.base import QuestionTemplate, GeneratedQuestion
+from .templates.templates import (
     LocationNameWeatherTemplate,
     MultiDayWeatherTemplate,
 )

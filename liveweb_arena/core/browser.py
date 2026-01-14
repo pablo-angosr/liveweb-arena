@@ -4,7 +4,7 @@ import asyncio
 from typing import Optional
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
 
-from core.models import BrowserObservation, BrowserAction
+from .models import BrowserObservation, BrowserAction
 
 # Constants
 MAX_ACCESSIBILITY_TREE_LENGTH = 5000

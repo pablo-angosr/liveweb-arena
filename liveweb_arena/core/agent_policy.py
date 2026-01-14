@@ -4,7 +4,7 @@ import json
 import re
 from typing import List, Optional, Tuple
 
-from core.models import BrowserAction, BrowserObservation, CompositeTask, TrajectoryStep
+from .models import BrowserAction, BrowserObservation, CompositeTask, TrajectoryStep
 
 
 # Valid action types

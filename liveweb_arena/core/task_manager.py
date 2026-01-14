@@ -3,8 +3,8 @@
 import random
 from typing import Dict, List, Optional, Type
 
-from plugins.base import BasePlugin, SubTask
-from core.models import CompositeTask
+from ..plugins.base import BasePlugin, SubTask
+from .models import CompositeTask
 
 
 class TaskManager:

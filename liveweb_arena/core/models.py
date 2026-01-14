@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from plugins.base import SubTask
+    from ..plugins.base import SubTask
 
 
 @dataclass

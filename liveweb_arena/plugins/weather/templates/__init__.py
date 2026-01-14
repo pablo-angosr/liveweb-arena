@@ -1,10 +1,10 @@
 """Weather-specific question templates"""
 
-from plugins.weather.templates.templates import (
+from .templates import (
     LocationNameWeatherTemplate,
     MultiDayWeatherTemplate,
 )
-from plugins.weather.templates.variables import (
+from .variables import (
     LocationVariable,
     DateVariable,
     WeatherMetricVariable,

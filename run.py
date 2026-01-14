@@ -18,8 +18,10 @@ import asyncio
 import json
 import os
 import sys
+from datetime import datetime
+from pathlib import Path
 
-from liveweb_arena.env import Actor
+from env import Actor
 
 
 async def main():
@@ -91,7 +93,7 @@ async def main():
         "--output",
         type=str,
         default=None,
-        help="Output file for results (default: print to stdout)",
+        help="Output file for results (default: eval/yyyy_mm_dd_hh_mm_ss.json)",
     )
     parser.add_argument(
         "--verbose",
@@ -169,11 +171,18 @@ async def main():
             print(f"Completion: {usage.get('completion_tokens', 0)}")
             print(f"Total: {usage.get('total_tokens', 0)}")
 
-        # Save to file if requested
+        # Save to file (auto-generate filename if not specified)
         if args.output:
-            with open(args.output, "w", encoding="utf-8") as f:
-                json.dump(result, f, indent=2, ensure_ascii=False)
-            print(f"\nResults saved to: {args.output}")
+            output_path = Path(args.output)
+        else:
+            eval_dir = Path(__file__).parent / "eval"
+            eval_dir.mkdir(exist_ok=True)
+            timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+            output_path = eval_dir / f"{timestamp}.json"
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+        print(f"\nResults saved to: {output_path}")
 
         # Return exit code based on success
         return 0 if result["success"] else 1

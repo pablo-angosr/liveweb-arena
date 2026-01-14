@@ -110,3 +110,18 @@ class BasePlugin(ABC):
             Ground truth value (type depends on question type)
         """
         pass
+
+    def get_validation_rules(self, validation_info: dict) -> str:
+        """
+        Get task-specific validation rules for LLM validator.
+
+        Override this method to provide task-specific scoring rules.
+        These rules will be included in the LLM validation prompt.
+
+        Args:
+            validation_info: Parameters for validation (from SubTask)
+
+        Returns:
+            Task-specific validation rules as a string
+        """
+        return ""  # Default: no specific rules

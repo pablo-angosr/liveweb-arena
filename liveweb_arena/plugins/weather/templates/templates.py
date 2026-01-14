@@ -1,15 +1,15 @@
 """Weather question templates for wttr.in"""
 
 import random
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import httpx
 
-from ...templates.base import QuestionTemplate, GeneratedQuestion, ValidationResult
-from ...templates.validators import NumericToleranceValidator, BooleanValidator, ExactMatchValidator
+from ....core.validators.base import QuestionTemplate, GeneratedQuestion, ValidationResult
+from ....core.validators.validators import NumericToleranceValidator, BooleanValidator, ExactMatchValidator
 from .variables import (
     LocationVariable, DateVariable, WeatherMetricVariable,
-    LocationType, DateType, MetricType,
+    LocationType, MetricType,
     LocationSpec, DateSpec, MetricSpec,
 )
 
@@ -70,7 +70,7 @@ class LocationNameWeatherTemplate(QuestionTemplate):
             regions=regions,
         ))
         self.register_variable(DateVariable(
-            max_forecast_days=7,
+            max_forecast_days=2,  # wttr.in only provides 3 days (0, 1, 2)
             use_chinese=use_chinese,
         ))
         self.register_variable(WeatherMetricVariable(
@@ -175,6 +175,31 @@ class LocationNameWeatherTemplate(QuestionTemplate):
             template_name=self.name,
         )
 
+    def get_validation_rules(self, validation_info: Dict[str, Any]) -> str:
+        """Get weather-specific validation rules"""
+        metric_type = validation_info.get("metric_type", "")
+        is_boolean = validation_info.get("is_boolean", False)
+
+        if is_boolean:
+            return """Task-Specific Rules (Weather - Yes/No Question):
+- Score 1.0: Both answers are Yes, or both are No
+- Score 0.0: Answers disagree (Yes vs No)"""
+
+        if "temp" in metric_type.lower():
+            return """Task-Specific Rules (Weather - Temperature):
+- Score 1.0: Numeric values match exactly OR differ by at most 1°C
+- Score 0.0: Difference exceeds 1°C"""
+
+        if "chance" in metric_type.lower() or "percent" in metric_type.lower():
+            return """Task-Specific Rules (Weather - Percentage):
+- Score 1.0: Numeric values match exactly OR differ by at most 5%
+- Score 0.0: Difference exceeds 5%"""
+
+        # Default for other weather metrics
+        return """Task-Specific Rules (Weather):
+- Score 1.0: Numeric values match exactly OR differ by at most 10%
+- Score 0.0: Difference exceeds 10%"""
+
     def _build_question(
         self,
         location: LocationSpec,
@@ -217,6 +242,7 @@ class LocationNameWeatherTemplate(QuestionTemplate):
         forecast_day = validation_info["forecast_day"]
         api_field = validation_info["api_field"]
         is_boolean = validation_info.get("is_boolean", False)
+        unit = validation_info.get("unit", "")
 
         url = f"https://wttr.in/{location}?format=j1"
 
@@ -225,6 +251,7 @@ class LocationNameWeatherTemplate(QuestionTemplate):
             response.raise_for_status()
             data = response.json()
 
+        weather = data.get("weather", [])
         # Extract value based on forecast day
         if forecast_day == 0:
             # Current conditions
@@ -238,7 +265,6 @@ class LocationNameWeatherTemplate(QuestionTemplate):
                     value = weather[0].get(api_field)
         else:
             # Future forecast
-            weather = data.get("weather", [])
             if forecast_day < len(weather):
                 day_data = weather[forecast_day]
                 value = day_data.get(api_field)
@@ -257,8 +283,11 @@ class LocationNameWeatherTemplate(QuestionTemplate):
         # Convert boolean for rain questions
         if is_boolean and value is not None:
             # Chance of rain > 30% means "will rain"
-            value = float(value) > 30
+            return "Yes" if float(value) > 30 else "No"
 
+        # Return value with unit for better AI validation
+        if value is not None and unit:
+            return f"{value}{unit}"
         return value
 
     async def validate_answer(
@@ -395,16 +424,23 @@ class MultiDayWeatherTemplate(QuestionTemplate):
                 for h in hourly:
                     chance = float(h.get("chanceofrain", 0))
                     if chance > 30:
-                        return True
-            return False
+                        return "Yes"
+            return "No"
         else:
-            # Return average value
+            # Return average value with unit
             values = []
             for i in range(min(num_days, len(weather))):
                 val = weather[i].get(api_field)
                 if val is not None:
                     values.append(float(val))
-            return sum(values) / len(values) if values else None
+            if values:
+                avg = sum(values) / len(values)
+                # Add unit based on metric type
+                metric_type = validation_info.get("metric_type", "")
+                if "temp" in metric_type.lower():
+                    return f"{avg:.1f}°C"
+                return avg
+            return None
 
     async def validate_answer(
         self,

@@ -1,12 +1,13 @@
-"""Question template framework for dynamic task generation
+"""Validators framework for answer validation
 
-This module provides the generic base classes and validators for building
-question templates. Plugin-specific variables and templates should be
-defined in their respective plugin directories.
+This module provides:
+- Base classes for question templates and validators
+- Generic validators (numeric, exact match, boolean, etc.)
+- LLM-based validator for flexible answer comparison
 
-Example:
-    plugins/weather/templates/ - Weather-specific templates and variables
-    plugins/stock/templates/ - Stock-specific templates and variables
+Plugin-specific templates should be defined in their respective plugin directories:
+    plugins/weather/templates/ - Weather-specific templates
+    plugins/stock/templates/ - Stock-specific templates
 """
 
 from .base import (

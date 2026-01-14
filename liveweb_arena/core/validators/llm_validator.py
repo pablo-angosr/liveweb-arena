@@ -18,24 +18,25 @@ class LLMValidationResult:
     reasoning: str  # LLM's reasoning (max 50 words)
 
 
-VALIDATION_PROMPT = """You are an answer validator. Compare the expected answer with the actual answer and determine if they match.
+# Common validation prompt (shared by all task types)
+COMMON_VALIDATION_PROMPT = """You are an answer validator. Compare the expected answer (ground truth from API) with the actual answer (from agent).
 
 Question: {question}
-Expected Answer: {expected}
-Actual Answer: {actual}
+Expected Answer (Ground Truth): {expected}
+Actual Answer (Agent Response): {actual}
 
-Instructions:
-1. Determine if the actual answer correctly answers the question based on the expected answer
-2. Be flexible with formatting differences (e.g., "28°C" vs "28 degrees" vs "28")
-3. For numeric values, allow small differences due to timing (e.g., temperature may vary by 1-2 degrees)
-4. If the question asks about multiple days and the actual answer provides individual daily values that match or are close to the expected average, consider it correct
-5. Focus on whether the actual answer provides the information requested in the question
-6. Output a score from 0.0 to 1.0 (1.0 = fully correct, 0.5 = partially correct, 0.0 = incorrect)
-7. Provide a brief reasoning (max 50 words)
+{task_specific_rules}
 
-Output ONLY a JSON object in this format:
-{{"score": <float>, "reasoning": "<brief explanation>"}}
+General Rules:
+1. Be flexible with format differences (e.g., "28°C" = "28 degrees" = "28")
+2. If agent says data unavailable but expected has a value: score 0.0
+3. Output ONLY a JSON object: {{"score": <0.0 or 1.0>, "reasoning": "<brief max 30 words>"}}
 """
+
+# Default task-specific rules (used when template doesn't provide any)
+DEFAULT_TASK_RULES = """Task-Specific Rules:
+- Score 1.0: Answers match exactly (ignoring format)
+- Score 0.0: Answers do not match"""
 
 
 class LLMValidator:
@@ -60,6 +61,7 @@ class LLMValidator:
         question: str,
         expected: Any,
         actual: Any,
+        task_specific_rules: str = "",
         model: str = "gpt-4o-mini",
         temperature: float = 0.0,
     ) -> LLMValidationResult:
@@ -70,6 +72,7 @@ class LLMValidator:
             question: The original question/task
             expected: Expected answer (ground truth)
             actual: Actual answer from the agent
+            task_specific_rules: Task-specific validation rules from template
             model: LLM model to use for validation
             temperature: LLM temperature (0 for deterministic)
 
@@ -95,11 +98,15 @@ class LLMValidator:
                 reasoning="Ground truth not available for validation.",
             )
 
+        # Use task-specific rules or default
+        rules = task_specific_rules if task_specific_rules else DEFAULT_TASK_RULES
+
         # Build validation prompt
-        prompt = VALIDATION_PROMPT.format(
+        prompt = COMMON_VALIDATION_PROMPT.format(
             question=question,
             expected=str(expected),
             actual=str(actual),
+            task_specific_rules=rules,
         )
 
         try:
@@ -179,6 +186,7 @@ async def validate_answers_with_llm(
     subtasks: list,
     answers: dict,
     ground_truths: dict,
+    validation_rules: dict = None,
     model: str = "gpt-4o-mini",
     validation_model: str = None,
 ) -> list:
@@ -190,6 +198,7 @@ async def validate_answers_with_llm(
         subtasks: List of SubTask objects
         answers: Dict of answer_tag -> answer from agent
         ground_truths: Dict of answer_tag -> ground truth value
+        validation_rules: Dict of answer_tag -> task-specific validation rules
         model: Default LLM model (fallback if validation_model not set)
         validation_model: Specific model for validation (recommended: fast model)
 
@@ -198,6 +207,7 @@ async def validate_answers_with_llm(
     """
     validator = LLMValidator(llm_client)
     results = []
+    validation_rules = validation_rules or {}
 
     # Use validation_model if provided, otherwise fall back to model
     actual_model = validation_model or model
@@ -207,11 +217,13 @@ async def validate_answers_with_llm(
         question = subtask.intent
         expected = ground_truths.get(tag)
         actual = answers.get(tag)
+        task_rules = validation_rules.get(tag, "")
 
         result = await validator.validate(
             question=question,
             expected=expected,
             actual=actual,
+            task_specific_rules=task_rules,
             model=actual_model,
         )
 

@@ -4,7 +4,7 @@ import random
 from typing import Dict, List, Type
 
 from ..base import BasePlugin, SubTask, ValidationResult
-from ..templates.base import QuestionTemplate, GeneratedQuestion
+from ...core.validators.base import QuestionTemplate, GeneratedQuestion
 from .templates.templates import (
     LocationNameWeatherTemplate,
     MultiDayWeatherTemplate,
@@ -145,6 +145,16 @@ The page displays an ASCII art weather report showing:
             template = list(self._template_instances.values())[0]
 
         return await template.get_ground_truth(validation_info)
+
+    def get_validation_rules(self, validation_info: dict) -> str:
+        """Get validation rules from the appropriate template"""
+        template_name = validation_info.get("template_name", "location_name")
+        template = self._template_instances.get(template_name)
+
+        if template is None:
+            template = list(self._template_instances.values())[0]
+
+        return template.get_validation_rules(validation_info)
 
     def register_template(self, name: str, template_class: Type[QuestionTemplate]):
         """

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from ...templates.base import Variable, VariableType
+from ....core.validators.base import Variable, VariableType
 
 
 class LocationType(Enum):

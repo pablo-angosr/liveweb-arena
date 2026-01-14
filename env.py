@@ -6,15 +6,15 @@ import random
 import time
 from typing import Dict, List, Optional, Type
 
-from .core.browser import BrowserEngine
-from .core.task_manager import TaskManager
-from .core.agent_policy import AgentPolicy
-from .core.agent_loop import AgentLoop
-from .core.parser import AnswerParser
-from .plugins.base import BasePlugin
-from .plugins.weather import WeatherPlugin
-from .plugins.templates.llm_validator import validate_answers_with_llm
-from .utils.llm_client import LLMClient
+from liveweb_arena.core.browser import BrowserEngine
+from liveweb_arena.core.task_manager import TaskManager
+from liveweb_arena.core.agent_policy import AgentPolicy
+from liveweb_arena.core.agent_loop import AgentLoop
+from liveweb_arena.core.parser import AnswerParser
+from liveweb_arena.plugins.base import BasePlugin
+from liveweb_arena.plugins.weather import WeatherPlugin
+from liveweb_arena.core.validators.llm_validator import validate_answers_with_llm
+from liveweb_arena.utils.llm_client import LLMClient
 
 
 class Actor:
@@ -188,13 +188,18 @@ class Actor:
             parsed_answers = parser.parse_answers(final_answer, num_subtasks)
             output_format = parser.get_output_format(final_answer)
 
-            # Collect ground truths from plugins
+            # Collect ground truths and validation rules from plugins
             ground_truths = {}
+            validation_rules = {}
             for subtask in task.subtasks:
                 plugin = self.task_manager.get_plugin(subtask.plugin_name)
                 try:
                     gt_result = await plugin.get_ground_truth(subtask.validation_info)
                     ground_truths[subtask.answer_tag] = gt_result
+                    # Get task-specific validation rules from plugin/template
+                    validation_rules[subtask.answer_tag] = plugin.get_validation_rules(
+                        subtask.validation_info
+                    )
                 except Exception as e:
                     ground_truths[subtask.answer_tag] = None
 
@@ -206,6 +211,7 @@ class Actor:
                 subtasks=task.subtasks,
                 answers=parsed_answers,
                 ground_truths=ground_truths,
+                validation_rules=validation_rules,
                 model=model,
                 validation_model=actual_validation_model,
             )
@@ -276,7 +282,7 @@ class Actor:
         Returns:
             List of conversation turns with role, content, and metadata
         """
-        from .core.models import CompositeTask, TrajectoryStep
+        from liveweb_arena.core.models import CompositeTask, TrajectoryStep
 
         conversation = []
 

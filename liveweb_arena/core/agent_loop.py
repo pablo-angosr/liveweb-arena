@@ -3,7 +3,7 @@
 from typing import Any, List, Optional, Tuple
 
 from .browser import BrowserSession
-from .models import BrowserAction, BrowserObservation, CompositeTask, TrajectoryStep
+from .models import BrowserAction, CompositeTask, TrajectoryStep
 from .agent_policy import AgentPolicy
 from ..utils.llm_client import LLMClient
 

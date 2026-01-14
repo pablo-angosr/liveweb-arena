@@ -197,6 +197,22 @@ class QuestionTemplate(ABC):
         """
         pass
 
+    def get_validation_rules(self, validation_info: Dict[str, Any]) -> str:
+        """
+        Get task-specific validation rules for this template type.
+
+        Override this method to provide specific scoring rules for this task type.
+        These rules will be appended to the common validation prompt.
+
+        Args:
+            validation_info: Information about the question being validated
+
+        Returns:
+            Task-specific validation rules as a string
+        """
+        # Default: no special rules
+        return ""
+
     def _sample_variables(self, rng: random.Random) -> Dict[str, Any]:
         """Sample all registered variables"""
         return {

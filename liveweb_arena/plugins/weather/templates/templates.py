@@ -322,13 +322,24 @@ class LocationNameWeatherTemplate(QuestionTemplate):
         return validator.validate(answer, ground_truth)
 
 
+class MultiDayQuestionType:
+    """Question types for multi-day weather queries"""
+    AVERAGE = "average"  # Ask for average value across days
+    DAILY = "daily"      # Ask for each day's value separately
+
+
 class MultiDayWeatherTemplate(QuestionTemplate):
     """
     Question template for multi-day weather queries.
 
+    Supports two question types:
+    - AVERAGE: "What is the average high temperature over the next 3 days?" → "19.5°C"
+    - DAILY: "What are the high temperatures for each of the next 3 days?" → "Day 1: 19°C, Day 2: 20°C, Day 3: 18°C"
+
     Examples:
-    - Will it rain in New York in the next 3 days?
-    - What is the average temperature in London this week?
+    - Will it rain in New York at any point in the next 3 days?
+    - What is the average high temperature in London over the next 2 days?
+    - What are the high temperatures for each day in Tokyo over the next 3 days?
     """
 
     def __init__(self, use_chinese: bool = False):
@@ -363,20 +374,17 @@ class MultiDayWeatherTemplate(QuestionTemplate):
         location: LocationSpec = location_var.sample(rng)
         metric: MetricSpec = metric_var.sample(rng)
 
-        # Sample number of days (2-5)
-        num_days = rng.randint(2, 5)
+        # Sample number of days (2-3, limited by wttr.in's 3-day forecast)
+        num_days = rng.randint(2, 3)
 
-        # Build question
+        # For non-boolean metrics, randomly choose between AVERAGE and DAILY
         if metric.is_boolean:
-            if self.use_chinese:
-                question_text = f"{location.display_name}未来{num_days}天会下雨吗？"
-            else:
-                question_text = f"Will it rain in {location.display_name} in the next {num_days} days?"
+            question_type = None  # Boolean questions have their own format
         else:
-            if self.use_chinese:
-                question_text = f"{location.display_name}未来{num_days}天的{metric.display_name}如何？"
-            else:
-                question_text = f"What is the {metric.display_name} in {location.display_name} over the next {num_days} days?"
+            question_type = rng.choice([MultiDayQuestionType.AVERAGE, MultiDayQuestionType.DAILY])
+
+        # Build question with clear semantics
+        question_text = self._build_question(location, metric, num_days, question_type)
 
         start_url = f"https://wttr.in/{location.api_query}"
 
@@ -386,6 +394,7 @@ class MultiDayWeatherTemplate(QuestionTemplate):
             "metric_type": metric.metric_type.value,
             "api_field": metric.api_field,
             "is_boolean": metric.is_boolean,
+            "question_type": question_type,  # AVERAGE, DAILY, or None for boolean
         }
 
         return GeneratedQuestion(
@@ -395,10 +404,71 @@ class MultiDayWeatherTemplate(QuestionTemplate):
                 "location": location,
                 "metric": metric,
                 "num_days": num_days,
+                "question_type": question_type,
             },
             validation_info=validation_info,
             template_name=self.name,
         )
+
+    def _build_question(
+        self,
+        location: LocationSpec,
+        metric: MetricSpec,
+        num_days: int,
+        question_type: str,
+    ) -> str:
+        """Build question text based on type"""
+        if metric.is_boolean:
+            # Boolean: "Will it rain at any point during the next N days?"
+            if self.use_chinese:
+                return f"{location.display_name}未来{num_days}天内会下雨吗？"
+            else:
+                return f"Will it rain in {location.display_name} at any point in the next {num_days} days?"
+
+        if question_type == MultiDayQuestionType.AVERAGE:
+            # Average: "What is the average X over the next N days?"
+            if self.use_chinese:
+                return f"{location.display_name}未来{num_days}天的平均{metric.display_name}是多少？"
+            else:
+                return f"What is the average {metric.display_name} in {location.display_name} over the next {num_days} days?"
+
+        else:  # DAILY
+            # Daily: "What are the X values for each of the next N days?"
+            if self.use_chinese:
+                return f"{location.display_name}未来{num_days}天每天的{metric.display_name}分别是多少？"
+            else:
+                return f"What are the {metric.display_name}s for each of the next {num_days} days in {location.display_name}?"
+
+    def get_validation_rules(self, validation_info: Dict[str, Any]) -> str:
+        """Get multi-day weather-specific validation rules"""
+        is_boolean = validation_info.get("is_boolean", False)
+        question_type = validation_info.get("question_type")
+        metric_type = validation_info.get("metric_type", "")
+        num_days = validation_info.get("num_days", 2)
+
+        if is_boolean:
+            return """Task-Specific Rules (Multi-Day Weather - Yes/No Question):
+- The question asks if it will rain at ANY point during the period
+- Score 1.0: Both answers agree (both Yes or both No)
+- Score 0.0: Answers disagree"""
+
+        if question_type == MultiDayQuestionType.AVERAGE:
+            tolerance = "1°C" if "temp" in metric_type.lower() else "10%"
+            return f"""Task-Specific Rules (Multi-Day Weather - Average Value):
+- The question asks for the AVERAGE value over {num_days} days
+- Expected answer is a single averaged value
+- Score 1.0: Values match exactly OR differ by at most {tolerance}
+- Score 0.0: Difference exceeds {tolerance}"""
+
+        else:  # DAILY
+            tolerance = "1°C" if "temp" in metric_type.lower() else "10%"
+            return f"""Task-Specific Rules (Multi-Day Weather - Daily Values):
+- The question asks for EACH DAY's value separately over {num_days} days
+- Expected answer lists {num_days} values, one per day
+- Score 1.0: All {num_days} daily values match (within {tolerance} each)
+- Score 0.5: Some values match, some differ
+- Score 0.0: Most values are wrong or answer format is completely different
+- Compare each day's value independently"""
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Any:
         """Fetch ground truth for multi-day query"""
@@ -406,6 +476,7 @@ class MultiDayWeatherTemplate(QuestionTemplate):
         num_days = validation_info["num_days"]
         api_field = validation_info["api_field"]
         is_boolean = validation_info.get("is_boolean", False)
+        question_type = validation_info.get("question_type")
 
         url = f"https://wttr.in/{location}?format=j1"
 
@@ -426,21 +497,35 @@ class MultiDayWeatherTemplate(QuestionTemplate):
                     if chance > 30:
                         return "Yes"
             return "No"
-        else:
-            # Return average value with unit
-            values = []
-            for i in range(min(num_days, len(weather))):
-                val = weather[i].get(api_field)
-                if val is not None:
-                    values.append(float(val))
-            if values:
-                avg = sum(values) / len(values)
-                # Add unit based on metric type
-                metric_type = validation_info.get("metric_type", "")
-                if "temp" in metric_type.lower():
-                    return f"{avg:.1f}°C"
-                return avg
+
+        # Collect daily values
+        daily_values = []
+        daily_dates = []
+        for i in range(min(num_days, len(weather))):
+            day_data = weather[i]
+            val = day_data.get(api_field)
+            date_str = day_data.get("date", f"Day {i+1}")
+            if val is not None:
+                daily_values.append(float(val))
+                daily_dates.append(date_str)
+
+        if not daily_values:
             return None
+
+        metric_type = validation_info.get("metric_type", "")
+        unit = "°C" if "temp" in metric_type.lower() else ""
+
+        if question_type == MultiDayQuestionType.AVERAGE:
+            # Return single average value
+            avg = sum(daily_values) / len(daily_values)
+            return f"{avg:.1f}{unit}" if unit else avg
+        else:
+            # Return list of daily values with dates
+            # Format: "2026-01-14: 19°C, 2026-01-15: 20°C"
+            parts = []
+            for date, val in zip(daily_dates, daily_values):
+                parts.append(f"{date}: {int(val)}{unit}")
+            return ", ".join(parts)
 
     async def validate_answer(
         self,

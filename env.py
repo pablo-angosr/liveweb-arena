@@ -275,6 +275,11 @@ class Actor:
         """
         Build conversation history from task and trajectory.
 
+        Uses standard conversation format:
+        - system: Rules and output format (not the question itself)
+        - user: The actual task/question
+        - assistant: Agent's response (with environment observations inline)
+
         Args:
             task: The composite task
             trajectory: List of trajectory steps
@@ -286,60 +291,77 @@ class Actor:
 
         conversation = []
 
-        # Add initial task as system message
+        # System message: only rules and output format
+        system_content = """You are a browser automation agent. Navigate web pages to complete tasks.
+
+## Output Requirements
+
+When you have completed all tasks, use the "stop" action with your answers in JSON format:
+
+```json
+{"answers": {"answer1": "...", "answer2": "..."}}
+```
+
+Each answer should be a concise, direct response to the corresponding task."""
+
         conversation.append({
             "role": "system",
-            "content": task.combined_intent,
+            "content": system_content,
             "metadata": {
-                "type": "task_description",
+                "type": "instructions",
+            }
+        })
+
+        # User message: the actual task questions
+        questions = []
+        for i, subtask in enumerate(task.subtasks, 1):
+            questions.append(f"{i}. {subtask.intent}\n   Answer tag: {subtask.answer_tag}")
+
+        user_content = "## Tasks to Complete\n\n" + "\n\n".join(questions)
+
+        conversation.append({
+            "role": "user",
+            "content": user_content,
+            "metadata": {
+                "type": "task_questions",
                 "num_subtasks": len(task.subtasks),
             }
         })
 
-        # Add each trajectory step
+        # Assistant turns: agent responses with environment observations
         for step in trajectory:
-            # Observation (environment state)
+            # Build observation content
             obs_content = (
-                f"URL: {step.observation.url}\n"
+                f"[Environment] URL: {step.observation.url}\n"
                 f"Title: {step.observation.title}\n"
-                f"Accessibility Tree:\n{step.observation.accessibility_tree[:2000]}"
+                f"Page Content:\n{step.observation.accessibility_tree[:2000]}"
             )
             if len(step.observation.accessibility_tree) > 2000:
                 obs_content += "\n... (truncated)"
 
+            # Build agent's thought and action
+            agent_content = ""
+            if step.thought:
+                agent_content += f"Thought: {step.thought}\n"
+            if step.action:
+                action_str = f"Action: {step.action.action_type}"
+                if step.action.params:
+                    action_str += f" {step.action.params}"
+                agent_content += action_str
+
+            # Combine observation and agent response
+            full_content = f"{obs_content}\n\n{agent_content.strip()}"
+
             conversation.append({
-                "role": "environment",
-                "content": obs_content,
+                "role": "assistant",
+                "content": full_content,
                 "metadata": {
-                    "type": "observation",
+                    "type": "agent_turn",
                     "step": step.step_num,
                     "url": step.observation.url,
+                    "action_type": step.action.action_type if step.action else None,
+                    "action_result": step.action_result,
                 }
             })
-
-            # Agent's thought and action
-            if step.thought or step.action:
-                action_str = ""
-                if step.action:
-                    action_str = f"Action: {step.action.action_type}"
-                    if step.action.params:
-                        action_str += f" {step.action.params}"
-
-                agent_content = ""
-                if step.thought:
-                    agent_content += f"Thought: {step.thought}\n"
-                if action_str:
-                    agent_content += action_str
-
-                conversation.append({
-                    "role": "agent",
-                    "content": agent_content.strip(),
-                    "metadata": {
-                        "type": "action",
-                        "step": step.step_num,
-                        "action_type": step.action.action_type if step.action else None,
-                        "action_result": step.action_result,
-                    }
-                })
 
         return conversation

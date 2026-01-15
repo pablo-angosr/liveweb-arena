@@ -336,6 +336,47 @@ class DateVariable(Variable):
         return value.api_date
 
 
+class TimeOfDay(Enum):
+    """Time periods within a day (maps to wttr.in hourly indices)"""
+    MORNING = "morning"      # 6:00-12:00 (indices 2-4)
+    AFTERNOON = "afternoon"  # 12:00-18:00 (indices 4-6)
+    EVENING = "evening"      # 18:00-21:00 (indices 6-7)
+    NIGHT = "night"          # 21:00-6:00 (indices 7, 0-2)
+
+
+@dataclass
+class TimeOfDaySpec:
+    """Specification of a time period"""
+    time_of_day: TimeOfDay
+    display_name: str
+    hourly_indices: List[int]  # wttr.in hourly array indices (0-7)
+
+
+class TimeOfDayVariable(Variable):
+    """Variable for time-of-day specifications."""
+
+    TIMES = {
+        TimeOfDay.MORNING: TimeOfDaySpec(TimeOfDay.MORNING, "morning", [2, 3, 4]),
+        TimeOfDay.AFTERNOON: TimeOfDaySpec(TimeOfDay.AFTERNOON, "afternoon", [4, 5, 6]),
+        TimeOfDay.EVENING: TimeOfDaySpec(TimeOfDay.EVENING, "evening", [6, 7]),
+        TimeOfDay.NIGHT: TimeOfDaySpec(TimeOfDay.NIGHT, "night", [0, 1, 7]),
+    }
+
+    def __init__(self, allowed_times: List[TimeOfDay] = None):
+        super().__init__("time_of_day", VariableType.DATE)
+        self.allowed_times = allowed_times or list(TimeOfDay)
+
+    def sample(self, rng: random.Random) -> TimeOfDaySpec:
+        time = rng.choice(self.allowed_times)
+        return self.TIMES[time]
+
+    def get_display_value(self, value: TimeOfDaySpec) -> str:
+        return value.display_name
+
+    def get_api_value(self, value: TimeOfDaySpec) -> str:
+        return value.time_of_day.value
+
+
 class MetricType(Enum):
     """Types of weather metrics"""
     TEMPERATURE = "temperature"
@@ -375,7 +416,7 @@ class WeatherMetricVariable(Variable):
 
     METRICS: Dict[MetricType, MetricSpec] = {
         MetricType.TEMPERATURE: MetricSpec(
-            MetricType.TEMPERATURE, "temperature", "temp_C", "°C",
+            MetricType.TEMPERATURE, "temperature", "tempC", "°C",
             full_tolerance=2, partial_tolerance=5
         ),
         MetricType.TEMPERATURE_HIGH: MetricSpec(

@@ -3,55 +3,38 @@
 import random
 from typing import Dict, List, Type
 
-from ..base import BasePlugin, SubTask, ValidationResult
-from ...core.validators.base import QuestionTemplate, GeneratedQuestion
-from .templates.templates import (
-    LocationNameWeatherTemplate,
-    MultiDayWeatherTemplate,
-)
+from liveweb_arena.plugins.base import BasePlugin, SubTask, ValidationResult
+from liveweb_arena.core.validators.base import QuestionTemplate, GeneratedQuestion, get_registered_templates
+
+# Import templates to trigger registration via decorators
+from . import templates as _  # noqa: F401
 
 
 class WeatherPlugin(BasePlugin):
     """
     Weather plugin using wttr.in.
 
-    Uses an extensible template framework for generating diverse questions:
-    - Location name-based queries (city, landmark, etc.)
-    - Multi-day forecast queries
-    - Various weather metrics (temperature, wind, rain, etc.)
-
-    Web side: https://wttr.in/{location}
-    Validation: https://wttr.in/{location}?format=j1
+    Templates are auto-registered via @register_template decorator:
+    - location_name: Single day, single metric queries
+    - multi_day: Multi-day aggregate or daily value queries
+    - time_of_day: Time-period specific queries (morning/afternoon/evening/night)
     """
 
-    # Template registry - each template generates different question types
-    TEMPLATES: Dict[str, Type[QuestionTemplate]] = {
-        "location_name": LocationNameWeatherTemplate,
-        "multi_day": MultiDayWeatherTemplate,
-    }
-
-    def __init__(
-        self,
-        templates: List[str] = None,
-        use_chinese: bool = False,
-    ):
-        """
-        Initialize weather plugin.
-
-        Args:
-            templates: Which templates to use (default: all)
-            use_chinese: Use Chinese question patterns
-        """
+    def __init__(self, templates: List[str] = None, use_chinese: bool = False):
         self.use_chinese = use_chinese
         self._template_instances: Dict[str, QuestionTemplate] = {}
 
-        # Initialize requested templates
-        template_names = templates or list(self.TEMPLATES.keys())
+        # Get templates from global registry
+        registered = get_registered_templates()
+        template_names = templates or list(registered.keys())
         for name in template_names:
-            if name in self.TEMPLATES:
-                self._template_instances[name] = self.TEMPLATES[name](
-                    use_chinese=use_chinese
-                )
+            if name in registered:
+                cls = registered[name]
+                # Some templates support use_chinese, others don't
+                try:
+                    self._template_instances[name] = cls(use_chinese=use_chinese)
+                except TypeError:
+                    self._template_instances[name] = cls()
 
     @property
     def name(self) -> str:
@@ -158,9 +141,12 @@ The page displays an ASCII art weather report showing:
 
     def register_template(self, name: str, template_class: Type[QuestionTemplate]):
         """
-        Register a new question template.
+        Register a new question template at runtime.
 
-        Allows external code to extend the plugin with new question types.
+        For new templates, prefer using the @register_template decorator instead.
+        This method is for dynamic registration at runtime.
         """
-        self.TEMPLATES[name] = template_class
-        self._template_instances[name] = template_class(use_chinese=self.use_chinese)
+        try:
+            self._template_instances[name] = template_class(use_chinese=self.use_chinese)
+        except TypeError:
+            self._template_instances[name] = template_class()

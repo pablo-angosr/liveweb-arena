@@ -376,22 +376,19 @@ Each answer should be a concise, direct response to the corresponding task."""
                 }
             })
 
-            # Assistant turn: agent's thought and action
-            agent_content = ""
-            if step.thought:
-                agent_content += f"Thought: {step.thought}\n"
+            # Assistant turn: action only, thought in metadata
             if step.action:
-                action_str = f"Action: {step.action.action_type}"
-                if step.action.params:
-                    action_str += f" {step.action.params}"
-                agent_content += action_str
+                action_content = f"{step.action.action_type} {step.action.params}" if step.action.params else step.action.action_type
+            else:
+                action_content = "(no action)"
 
             conversation.append({
                 "role": "assistant",
-                "content": agent_content.strip() if agent_content.strip() else "(no response)",
+                "content": action_content,
                 "metadata": {
                     "type": "agent_action",
                     "step": step.step_num,
+                    "thought": step.thought,
                     "action_type": step.action.action_type if step.action else None,
                     "action_result": step.action_result,
                 }

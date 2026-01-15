@@ -5,8 +5,8 @@ from typing import Any, Dict, List
 
 import httpx
 
-from ....core.validators.base import QuestionTemplate, GeneratedQuestion, ValidationResult
-from ....core.validators.validators import NumericToleranceValidator, BooleanValidator, ExactMatchValidator
+from liveweb_arena.core.validators.base import QuestionTemplate, GeneratedQuestion, ValidationResult, register_template
+from liveweb_arena.core.validators.validators import NumericToleranceValidator, BooleanValidator, ExactMatchValidator
 from .variables import (
     LocationVariable, DateVariable, WeatherMetricVariable,
     LocationType, MetricType,
@@ -14,6 +14,7 @@ from .variables import (
 )
 
 
+@register_template("location_name")
 class LocationNameWeatherTemplate(QuestionTemplate):
     """
     Question template for location name-based weather queries.
@@ -328,6 +329,7 @@ class MultiDayQuestionType:
     DAILY = "daily"      # Ask for each day's value separately
 
 
+@register_template("multi_day")
 class MultiDayWeatherTemplate(QuestionTemplate):
     """
     Question template for multi-day weather queries.

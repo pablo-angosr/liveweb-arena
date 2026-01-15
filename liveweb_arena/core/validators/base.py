@@ -3,8 +3,37 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Dict, List, Optional, Callable, Type
 import random
+
+
+# Global template registry
+_TEMPLATE_REGISTRY: Dict[str, Type["QuestionTemplate"]] = {}
+
+
+def register_template(name: str):
+    """
+    Decorator to register a template class.
+
+    Usage:
+        @register_template("location_name")
+        class LocationNameWeatherTemplate(QuestionTemplate):
+            ...
+    """
+    def decorator(cls: Type["QuestionTemplate"]) -> Type["QuestionTemplate"]:
+        _TEMPLATE_REGISTRY[name] = cls
+        return cls
+    return decorator
+
+
+def get_registered_templates() -> Dict[str, Type["QuestionTemplate"]]:
+    """Get all registered templates"""
+    return _TEMPLATE_REGISTRY.copy()
+
+
+def get_template(name: str) -> Optional[Type["QuestionTemplate"]]:
+    """Get a template class by name"""
+    return _TEMPLATE_REGISTRY.get(name)
 
 
 class VariableType(Enum):

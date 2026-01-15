@@ -83,7 +83,20 @@ class NumericToleranceValidator(Validator):
                 details="Ground truth not available",
             )
 
-        expected = float(ground_truth)
+        # Extract numeric value from ground truth (may have units)
+        expected = self.extract_value(str(ground_truth))
+        if expected is None:
+            try:
+                expected = float(ground_truth)
+            except (ValueError, TypeError):
+                return ValidationResult(
+                    score=0.0,
+                    is_correct=False,
+                    expected=ground_truth,
+                    actual=actual,
+                    details="Could not parse ground truth",
+                )
+
         diff = abs(actual - expected)
 
         if diff <= self.full_tolerance:
@@ -227,7 +240,13 @@ class BooleanValidator(Validator):
                 details="Could not determine yes/no from answer",
             )
 
-        expected = bool(ground_truth) if ground_truth is not None else None
+        # Extract boolean from ground truth (may be string like "Yes"/"No")
+        if isinstance(ground_truth, bool):
+            expected = ground_truth
+        elif isinstance(ground_truth, str):
+            expected = self.extract_value(ground_truth)
+        else:
+            expected = bool(ground_truth) if ground_truth is not None else None
         if expected is None:
             return ValidationResult(
                 score=0.0,

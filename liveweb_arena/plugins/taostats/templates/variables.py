@@ -15,6 +15,8 @@ class SubnetMetric(Enum):
     EMISSION = "emission"
     REGISTRATION_COST = "registration_cost"
     PRICE = "price"  # Alpha token price
+    TEMPO = "tempo"  # Block interval
+    GITHUB_REPO = "github_repo"  # GitHub repository URL
 
 
 @dataclass
@@ -114,6 +116,13 @@ class MetricVariable(Variable):
         SubnetMetric.PRICE: MetricSpec(
             SubnetMetric.PRICE, "alpha price", unit="τ", is_numeric=True,
             tolerance_pct=10.0
+        ),
+        SubnetMetric.TEMPO: MetricSpec(
+            SubnetMetric.TEMPO, "tempo", unit="blocks", is_numeric=True,
+            tolerance_pct=0.0  # Tempo is exact, no tolerance needed
+        ),
+        SubnetMetric.GITHUB_REPO: MetricSpec(
+            SubnetMetric.GITHUB_REPO, "GitHub repository", is_numeric=False
         ),
     }
 

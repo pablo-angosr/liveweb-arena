@@ -17,7 +17,7 @@ class SubnetInfoTemplate(QuestionTemplate):
 
     Uses Bittensor Python SDK for ground truth validation.
     Generates diverse questions about Bittensor subnets:
-    - 52 subnets × 5 metrics = 260 unique question combinations
+    - 128 subnets × 7 metrics = 896+ unique question combinations
     """
 
     PATTERNS: Dict[SubnetMetric, List[str]] = {
@@ -43,6 +43,16 @@ class SubnetInfoTemplate(QuestionTemplate):
             "What is the alpha price of {subnet}?",
             "What's the current alpha token price for {subnet}?",
         ],
+        SubnetMetric.TEMPO: [
+            "What is the tempo of {subnet}?",
+            "What's the block interval for {subnet}?",
+            "How many blocks per epoch does {subnet} use?",
+        ],
+        SubnetMetric.GITHUB_REPO: [
+            "What is the GitHub repository for {subnet}?",
+            "Where can I find the source code for {subnet}?",
+            "What's the official GitHub URL of {subnet}?",
+        ],
     }
 
     def __init__(self):
@@ -62,6 +72,10 @@ class SubnetInfoTemplate(QuestionTemplate):
         self.register_validator("price", NumericToleranceValidator(
             full_tolerance=0.0001, partial_tolerance=0.001, unit="τ"
         ))
+        self.register_validator("tempo", NumericToleranceValidator(
+            full_tolerance=0, partial_tolerance=0, unit="blocks"  # Exact match for tempo
+        ))
+        self.register_validator("github_repo", ExactMatchValidator(case_sensitive=False))
 
     def generate(self, seed: int) -> GeneratedQuestion:
         rng = random.Random(seed)
@@ -102,6 +116,16 @@ class SubnetInfoTemplate(QuestionTemplate):
 - Score 1.0: Addresses match (truncated format acceptable)
 - Score 0.0: Different addresses"""
 
+        if metric == "tempo":
+            return """Task-Specific Rules (Tempo):
+- Score 1.0: Exact numeric match
+- Score 0.0: Different values"""
+
+        if metric == "github_repo":
+            return """Task-Specific Rules (GitHub Repository):
+- Score 1.0: URLs match (case-insensitive)
+- Score 0.0: Different URLs or no repository"""
+
         return """Task-Specific Rules (Numeric Value):
 - Score 1.0: Values match within tolerance
 - Score 0.0: Values differ significantly"""
@@ -136,6 +160,12 @@ class SubnetInfoTemplate(QuestionTemplate):
                 return f"τ{burn.tao:.6f}" if burn else None
             elif metric == "price":
                 return f"τ{info.price:.6f}" if info.price else None
+            elif metric == "tempo":
+                return str(info.tempo)
+            elif metric == "github_repo":
+                if info.subnet_identity and info.subnet_identity.github_repo:
+                    return info.subnet_identity.github_repo
+                return None
 
             return None
 

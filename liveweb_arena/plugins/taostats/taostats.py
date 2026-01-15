@@ -56,24 +56,25 @@ class TaostatsPlugin(BasePlugin):
 
 **Website**: https://taostats.io
 
-**Main Pages**:
-- /subnets - Complete list of all Bittensor subnets with key metrics
-- /subnets/{id} - Detailed information for a specific subnet
-- /validators - List of validators with stake and performance data
+**Key Pages**:
+- /subnets - List of all SUBNETS (like Apex, Nodexo, ItsAI) with rankings by market cap, price, emission
+- /subnets/{id} - Detailed info for a specific subnet (e.g., /subnets/27 for Nodexo)
+- /validators - List of VALIDATORS (like tao.bot, Taostats, RoundTable21)
 
-**Subnet Page Content**:
-Each subnet page shows:
-- Name and description
-- Owner address
-- Registration cost (in TAO)
-- Number of validators and miners
-- Emission rate
-- Tempo and other parameters
+**IMPORTANT - Subnets vs Validators**:
+- SUBNETS are networks (Apex, Nodexo, Templar, etc.) - find on /subnets page
+- VALIDATORS are node operators (tao.bot, Taostats, etc.) - find on /validators page
+- If question mentions subnet name like "Nodexo" or "Apex", go to /subnets
+
+**Subnet Page (/subnets/{id}) Content**:
+- Name, owner address, registration cost
+- Emission rate, tempo, alpha price
+- GitHub repository (if available)
 
 **Tips**:
-- Subnet IDs are numeric (0 = root network, 1+ = application subnets)
+- Subnet rankings shown on /subnets page (sortable by market cap, price, emission)
 - TAO amounts shown with τ symbol
-- Look for data tables and statistics cards on the page
+- Subnet names are displayed with "SN" prefix (e.g., SN27 for Nodexo)
 """
 
     async def generate_task(self, seed: int) -> SubTask:

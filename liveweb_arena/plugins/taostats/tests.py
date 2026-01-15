@@ -51,8 +51,8 @@ async def test_metric_variable_coverage():
     """Verify MetricVariable covers all metric types"""
     var = MetricVariable()
 
-    # Should have all 5 metrics
-    assert_true(len(var.allowed_metrics) == 5, f"Expected 5 metrics, got {len(var.allowed_metrics)}")
+    # Should have all 7 metrics (name, owner, emission, registration_cost, price, tempo, github_repo)
+    assert_true(len(var.allowed_metrics) == 7, f"Expected 7 metrics, got {len(var.allowed_metrics)}")
 
     # Test sampling covers all metrics
     import random
@@ -62,7 +62,7 @@ async def test_metric_variable_coverage():
         spec = var.sample(rng)
         seen.add(spec.metric)
 
-    assert_true(len(seen) == 5, f"Should sample all 5 metrics, got {len(seen)}")
+    assert_true(len(seen) == 7, f"Should sample all 7 metrics, got {len(seen)}")
     print("  MetricVariable coverage: passed")
 
 
@@ -180,8 +180,8 @@ async def test_question_diversity():
     min_subnets = min(int(len(var.subnet_ids) * 0.75), 40)
     assert_true(len(subnets) >= min_subnets,
         f"Should cover {min_subnets}+ subnets, got {len(subnets)}")
-    assert_true(len(metrics) == 5,
-        f"Should cover all 5 metrics, got {len(metrics)}")
+    assert_true(len(metrics) == 7,
+        f"Should cover all 7 metrics, got {len(metrics)}")
 
     print(f"  Question diversity: {len(questions)} unique questions, "
           f"{len(subnets)} subnets, {len(metrics)} metrics")
@@ -202,6 +202,10 @@ async def test_validation_rules():
             assert_match(r"name", rules, f"seed={seed}: NAME rules should mention name")
         elif metric == "owner":
             assert_match(r"address", rules, f"seed={seed}: OWNER rules should mention address")
+        elif metric == "tempo":
+            assert_match(r"exact", rules, f"seed={seed}: TEMPO rules should mention exact match")
+        elif metric == "github_repo":
+            assert_match(r"URL", rules, f"seed={seed}: GITHUB_REPO rules should mention URL")
         elif is_numeric:
             assert_match(r"tolerance", rules, f"seed={seed}: Numeric rules should mention tolerance")
 

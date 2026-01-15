@@ -13,6 +13,7 @@ from liveweb_arena.core.agent_loop import AgentLoop
 from liveweb_arena.core.parser import AnswerParser
 from liveweb_arena.plugins.base import BasePlugin
 from liveweb_arena.plugins.weather import WeatherPlugin
+from liveweb_arena.plugins.taostats import TaostatsPlugin
 from liveweb_arena.core.validators.llm_validator import validate_answers_with_llm
 from liveweb_arena.utils.llm_client import LLMClient
 from liveweb_arena.utils.logger import log
@@ -33,11 +34,7 @@ class Actor:
     # Plugin registry
     PLUGINS: Dict[str, Type[BasePlugin]] = {
         "weather": WeatherPlugin,
-        # Future plugins:
-        # "stock": StockPlugin,
-        # "paper": PaperPlugin,
-        # "flight": FlightPlugin,
-        # "news": NewsPlugin,
+        "taostats": TaostatsPlugin,
     }
 
     def __init__(self, api_key: str = None):

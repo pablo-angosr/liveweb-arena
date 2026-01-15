@@ -7,6 +7,8 @@ from typing import Optional, Tuple
 import httpx
 import openai
 
+from .logger import log
+
 
 class LLMClient:
     """
@@ -21,21 +23,26 @@ class LLMClient:
     # Recoverable error status codes
     RETRY_STATUS_CODES = {429, 503, 502, 500}
 
-    # Default retry configuration
+    # Retry configuration
     MAX_RETRIES = 3
     BASE_DELAY = 1.0  # seconds
-    MAX_DELAY = 8.0  # seconds
+    MAX_DELAY = 10.0  # seconds
 
-    def __init__(self, base_url: str, api_key: str):
+    # Default timeout per request (should be less than total eval timeout)
+    DEFAULT_TIMEOUT = 60  # seconds
+
+    def __init__(self, base_url: str, api_key: str, default_timeout: int = None):
         """
         Initialize LLM client.
 
         Args:
             base_url: OpenAI-compatible API base URL
             api_key: API key for authentication
+            default_timeout: Default request timeout in seconds
         """
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
+        self._default_timeout = default_timeout or self.DEFAULT_TIMEOUT
 
     async def chat(
         self,
@@ -44,7 +51,7 @@ class LLMClient:
         model: str,
         temperature: float = 0.7,
         seed: Optional[int] = None,
-        timeout_s: int = 30,
+        timeout_s: int = None,
     ) -> Tuple[str, Optional[dict]]:
         """
         Make a chat completion request.
@@ -55,11 +62,14 @@ class LLMClient:
             model: Model name
             temperature: Sampling temperature
             seed: Random seed for reproducibility
-            timeout_s: Request timeout in seconds
+            timeout_s: Request timeout in seconds (default: use client default)
 
         Returns:
             Tuple of (response content, usage dict or None)
         """
+        # Use default timeout if not specified
+        actual_timeout = timeout_s if timeout_s is not None else self._default_timeout
+
         # Build messages
         messages = []
         if system:
@@ -75,23 +85,31 @@ class LLMClient:
                     model=model,
                     temperature=temperature,
                     seed=seed,
-                    timeout_s=timeout_s,
+                    timeout_s=actual_timeout,
                 )
                 return content, usage
 
             except openai.RateLimitError as e:
                 last_error = e
+                log("LLM", f"Rate limit hit, attempt {attempt + 1}/{self.MAX_RETRIES}")
                 await self._backoff(attempt)
 
             except openai.APIStatusError as e:
                 if e.status_code in self.RETRY_STATUS_CODES:
                     last_error = e
+                    log("LLM", f"API error {e.status_code}, attempt {attempt + 1}/{self.MAX_RETRIES}")
                     await self._backoff(attempt)
                 else:
                     raise
 
             except (httpx.TimeoutException, httpx.ConnectError) as e:
                 last_error = e
+                log("LLM", f"Connection error, attempt {attempt + 1}/{self.MAX_RETRIES}: {type(e).__name__}")
+                await self._backoff(attempt)
+
+            except Exception as e:
+                last_error = e
+                log("LLM", f"Error, attempt {attempt + 1}/{self.MAX_RETRIES}: {type(e).__name__}")
                 await self._backoff(attempt)
 
         # All retries exhausted
@@ -106,10 +124,18 @@ class LLMClient:
         timeout_s: int,
     ) -> Tuple[str, Optional[dict]]:
         """Make a single API request with streaming"""
+        # Use longer timeouts for connection and read
+        timeout_config = httpx.Timeout(
+            connect=30.0,  # Connection timeout
+            read=timeout_s,  # Read timeout (for streaming)
+            write=30.0,  # Write timeout
+            pool=30.0,  # Pool timeout
+        )
+
         client = openai.AsyncOpenAI(
             base_url=self._base_url,
             api_key=self._api_key,
-            timeout=httpx.Timeout(timeout_s),
+            timeout=timeout_config,
             max_retries=0,  # We handle retries ourselves
         )
 
@@ -131,8 +157,10 @@ class LLMClient:
         # Collect streamed content and usage
         content_parts = []
         usage = None
+        chunk_count = 0
 
         async for chunk in stream:
+            chunk_count += 1
             if chunk.choices and chunk.choices[0].delta.content:
                 content_parts.append(chunk.choices[0].delta.content)
             if chunk.usage:
@@ -140,7 +168,8 @@ class LLMClient:
 
         content = "".join(content_parts)
         if not content:
-            raise ValueError("LLM returned empty response")
+            # More descriptive error for debugging
+            raise ValueError(f"LLM returned empty response after {chunk_count} chunks")
 
         return content.strip(), usage
 

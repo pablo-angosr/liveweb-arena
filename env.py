@@ -15,6 +15,7 @@ from liveweb_arena.plugins.base import BasePlugin
 from liveweb_arena.plugins.weather import WeatherPlugin
 from liveweb_arena.core.validators.llm_validator import validate_answers_with_llm
 from liveweb_arena.utils.llm_client import LLMClient
+from liveweb_arena.utils.logger import log
 
 
 class Actor:
@@ -145,63 +146,51 @@ class Actor:
         validation_model: Optional[str] = None,
     ) -> dict:
         """Internal evaluation logic"""
-        # Ensure browser is started
         await self._ensure_browser()
 
-        # Generate composite task
         task = await self.task_manager.generate_composite_task(
             seed=seed,
             num_subtasks=num_subtasks,
             plugin_names=plugins,
         )
+        log("Actor", f"Generated {len(task.subtasks)} subtasks, seed={seed}")
 
         # Create isolated browser session
         session = await self.browser.new_session()
 
         try:
-            # Initialize components
             llm_client = LLMClient(base_url=base_url, api_key=api_key)
-            policy = AgentPolicy()
             agent_loop = AgentLoop(
                 session=session,
                 llm_client=llm_client,
-                policy=policy,
+                policy=AgentPolicy(),
                 max_steps=max_steps,
             )
 
-            # Run agent loop with timeout
             try:
                 trajectory, final_answer, usage = await asyncio.wait_for(
-                    agent_loop.run(
-                        task=task,
-                        model=model,
-                        temperature=temperature,
-                        seed=seed,
-                    ),
+                    agent_loop.run(task=task, model=model, temperature=temperature, seed=seed),
                     timeout=timeout,
                 )
             except asyncio.TimeoutError:
-                trajectory, final_answer, usage = [], None, None
+                log("Actor", f"Timeout after {timeout}s", force=True)
+                trajectory = agent_loop.get_trajectory()
+                final_answer = agent_loop.get_final_answer()
+                usage = agent_loop.get_usage()
 
             # Parse answers
             parser = AnswerParser()
             parsed_answers = parser.parse_answers(final_answer, num_subtasks)
             output_format = parser.get_output_format(final_answer)
 
-            # Collect ground truths and validation rules from plugins
-            ground_truths = {}
+            # Collect ground truths and validation rules from plugins with retry
+            ground_truths = await self._fetch_ground_truths_with_retry(task.subtasks)
             validation_rules = {}
             for subtask in task.subtasks:
                 plugin = self.task_manager.get_plugin(subtask.plugin_name)
-                try:
-                    gt_result = await plugin.get_ground_truth(subtask.validation_info)
-                    ground_truths[subtask.answer_tag] = gt_result
-                    # Get task-specific validation rules from plugin/template
-                    validation_rules[subtask.answer_tag] = plugin.get_validation_rules(
-                        subtask.validation_info
-                    )
-                except Exception as e:
-                    ground_truths[subtask.answer_tag] = None
+                validation_rules[subtask.answer_tag] = plugin.get_validation_rules(
+                    subtask.validation_info
+                )
 
             # Use LLM to validate answers
             # Default validation model: openai/gpt-oss-120b-TEE (fast and reliable)
@@ -243,7 +232,6 @@ class Actor:
                     "num_subtasks": num_subtasks,
                     "final_url": final_url,
                     "output_format": output_format,
-                    "json_repair_count": policy.json_repair_count,
                     "usage": usage,
                     "answer_details": answer_validations,
                     "conversation": conversation,
@@ -253,6 +241,45 @@ class Actor:
         finally:
             # Always close the session
             await session.close()
+
+    async def _fetch_ground_truths_with_retry(
+        self,
+        subtasks: list,
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+    ) -> dict:
+        """
+        Fetch ground truths for all subtasks with retry mechanism.
+
+        Args:
+            subtasks: List of SubTask objects
+            max_retries: Maximum number of retry attempts per subtask
+            retry_delay: Delay between retries in seconds
+
+        Returns:
+            Dict mapping answer_tag to ground truth value
+        """
+        ground_truths = {}
+
+        for subtask in subtasks:
+            plugin = self.task_manager.get_plugin(subtask.plugin_name)
+            last_error = None
+
+            for attempt in range(max_retries):
+                try:
+                    gt_result = await plugin.get_ground_truth(subtask.validation_info)
+                    ground_truths[subtask.answer_tag] = gt_result
+                    break
+                except Exception as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                    continue
+            else:
+                ground_truths[subtask.answer_tag] = None
+                log("Actor", f"Ground truth fetch failed for {subtask.answer_tag}: {last_error}", force=True)
+
+        return ground_truths
 
     async def _ensure_browser(self):
         """Ensure browser is started (lazy initialization)"""
@@ -277,8 +304,8 @@ class Actor:
 
         Uses standard conversation format:
         - system: Rules and output format (not the question itself)
-        - user: The actual task/question
-        - assistant: Agent's response (with environment observations inline)
+        - user: The actual task/question, and environment observations
+        - assistant: Agent's thought and action
 
         Args:
             task: The composite task
@@ -328,18 +355,28 @@ Each answer should be a concise, direct response to the corresponding task."""
             }
         })
 
-        # Assistant turns: agent responses with environment observations
+        # Alternating user (environment) and assistant (agent) turns
         for step in trajectory:
-            # Build observation content
+            # User turn: environment observation
             obs_content = (
-                f"[Environment] URL: {step.observation.url}\n"
+                f"URL: {step.observation.url}\n"
                 f"Title: {step.observation.title}\n"
                 f"Page Content:\n{step.observation.accessibility_tree[:2000]}"
             )
             if len(step.observation.accessibility_tree) > 2000:
                 obs_content += "\n... (truncated)"
 
-            # Build agent's thought and action
+            conversation.append({
+                "role": "user",
+                "content": obs_content,
+                "metadata": {
+                    "type": "environment",
+                    "step": step.step_num,
+                    "url": step.observation.url,
+                }
+            })
+
+            # Assistant turn: agent's thought and action
             agent_content = ""
             if step.thought:
                 agent_content += f"Thought: {step.thought}\n"
@@ -349,16 +386,12 @@ Each answer should be a concise, direct response to the corresponding task."""
                     action_str += f" {step.action.params}"
                 agent_content += action_str
 
-            # Combine observation and agent response
-            full_content = f"{obs_content}\n\n{agent_content.strip()}"
-
             conversation.append({
                 "role": "assistant",
-                "content": full_content,
+                "content": agent_content.strip() if agent_content.strip() else "(no response)",
                 "metadata": {
-                    "type": "agent_turn",
+                    "type": "agent_action",
                     "step": step.step_num,
-                    "url": step.observation.url,
                     "action_type": step.action.action_type if step.action else None,
                     "action_result": step.action_result,
                 }

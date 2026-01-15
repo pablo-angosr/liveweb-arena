@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from env import Actor
+from liveweb_arena.utils.logger import set_verbose
 
 
 async def main():
@@ -103,6 +104,9 @@ async def main():
 
     args = parser.parse_args()
 
+    # Set verbose mode globally
+    set_verbose(args.verbose)
+
     # Get API key
     api_key = args.api_key or os.getenv("CHUTES_API_KEY")
     if not api_key:
@@ -110,12 +114,7 @@ async def main():
         sys.exit(1)
 
     if args.verbose:
-        print(f"Model: {args.model}")
-        print(f"Base URL: {args.base_url}")
-        print(f"Seed: {args.seed or 'random'}")
-        print(f"Tasks: {args.num_tasks}")
-        print(f"Plugins: {args.plugins}")
-        print()
+        print(f"Config: model={args.model}, seed={args.seed or 'random'}, tasks={args.num_tasks}")
 
     # Initialize actor
     actor = Actor(api_key=api_key)

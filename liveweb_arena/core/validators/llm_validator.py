@@ -189,6 +189,7 @@ async def validate_answers_with_llm(
     validation_rules: dict = None,
     model: str = "gpt-4o-mini",
     validation_model: str = None,
+    parallel: bool = True,
 ) -> list:
     """
     Validate multiple answers using LLM.
@@ -201,18 +202,21 @@ async def validate_answers_with_llm(
         validation_rules: Dict of answer_tag -> task-specific validation rules
         model: Default LLM model (fallback if validation_model not set)
         validation_model: Specific model for validation (recommended: fast model)
+        parallel: Whether to validate answers in parallel (default: True)
 
     Returns:
         List of validation result dicts with expected, actual, score, reasoning
     """
+    import asyncio
+
     validator = LLMValidator(llm_client)
-    results = []
     validation_rules = validation_rules or {}
 
     # Use validation_model if provided, otherwise fall back to model
     actual_model = validation_model or model
 
-    for subtask in subtasks:
+    async def validate_single(subtask):
+        """Validate a single subtask answer"""
         tag = subtask.answer_tag
         question = subtask.intent
         expected = ground_truths.get(tag)
@@ -227,7 +231,7 @@ async def validate_answers_with_llm(
             model=actual_model,
         )
 
-        results.append({
+        return {
             "question": question,
             "answer_tag": tag,
             "expected": result.expected,
@@ -235,6 +239,35 @@ async def validate_answers_with_llm(
             "score": result.score,
             "is_correct": result.is_correct,
             "reasoning": result.reasoning,
-        })
+        }
 
-    return results
+    if parallel and len(subtasks) > 1:
+        # Parallel validation for multiple subtasks
+        tasks = [validate_single(subtask) for subtask in subtasks]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Handle any exceptions
+        final_results = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                # Return error result for failed validation
+                subtask = subtasks[i]
+                final_results.append({
+                    "question": subtask.intent,
+                    "answer_tag": subtask.answer_tag,
+                    "expected": ground_truths.get(subtask.answer_tag),
+                    "actual": answers.get(subtask.answer_tag),
+                    "score": 0.0,
+                    "is_correct": False,
+                    "reasoning": f"Validation failed: {str(result)}",
+                })
+            else:
+                final_results.append(result)
+        return final_results
+    else:
+        # Sequential validation
+        results = []
+        for subtask in subtasks:
+            result = await validate_single(subtask)
+            results.append(result)
+        return results

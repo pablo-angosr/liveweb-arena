@@ -6,16 +6,14 @@ from .browser import BrowserSession
 from .models import BrowserAction, CompositeTask, TrajectoryStep
 from .agent_policy import AgentPolicy
 from ..utils.llm_client import LLMClient
+from ..utils.logger import log
 
 
 class AgentLoop:
     """
     Main agent loop that drives browser interaction via LLM.
 
-    Responsibilities:
-    - Navigate to start URL
-    - Loop: observe -> think -> act until stop or max_steps
-    - Return trajectory and final answer
+    The loop maintains trajectory state internally for partial recovery on timeout.
     """
 
     def __init__(
@@ -25,19 +23,27 @@ class AgentLoop:
         policy: AgentPolicy,
         max_steps: int = 30,
     ):
-        """
-        Initialize agent loop.
-
-        Args:
-            session: Browser session to control
-            llm_client: LLM client for generating actions
-            policy: Agent policy for prompt building and parsing
-            max_steps: Maximum number of interaction steps
-        """
         self._session = session
         self._llm_client = llm_client
         self._policy = policy
         self._max_steps = max_steps
+
+        # Internal state for partial recovery
+        self._trajectory: List[TrajectoryStep] = []
+        self._total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        self._final_answer = None
+
+    def get_trajectory(self) -> List[TrajectoryStep]:
+        """Get current trajectory (for partial recovery on timeout)"""
+        return self._trajectory.copy()
+
+    def get_usage(self) -> Optional[dict]:
+        """Get current usage stats"""
+        return self._total_usage.copy() if any(self._total_usage.values()) else None
+
+    def get_final_answer(self) -> Any:
+        """Get final answer if available"""
+        return self._final_answer
 
     async def run(
         self,
@@ -61,24 +67,25 @@ class AgentLoop:
             - final_answer: The final answer dict from stop action, or None
             - usage: Aggregated LLM usage dict
         """
-        trajectory: List[TrajectoryStep] = []
-        final_answer = None
-        total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-
-        # Reset policy repair count
+        # Reset internal state
+        self._trajectory = []
+        self._total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        self._final_answer = None
         self._policy.reset_repair_count()
 
-        # Build system prompt once
         system_prompt = self._policy.build_system_prompt(task)
+        log("Agent", f"Starting loop, max_steps={self._max_steps}")
 
-        # Start from about:blank - Agent decides which URL to visit
         obs = await self._session.goto("about:blank")
+        consecutive_errors = 0
 
         for step_num in range(self._max_steps):
-            # Build step prompt
-            user_prompt = self._policy.build_step_prompt(obs, trajectory)
+            log("Agent", f"Step {step_num + 1}/{self._max_steps}, url={obs.url[:50]}")
 
-            # Call LLM
+            # Pre-save observation so it's not lost if LLM call times out
+            current_obs = obs
+            user_prompt = self._policy.build_step_prompt(current_obs, self._trajectory)
+
             try:
                 raw_response, usage = await self._llm_client.chat(
                     system=system_prompt,
@@ -87,69 +94,64 @@ class AgentLoop:
                     temperature=temperature,
                     seed=seed,
                 )
-
-                # Aggregate usage
                 if usage:
-                    for key in total_usage:
-                        total_usage[key] += usage.get(key, 0)
+                    for key in self._total_usage:
+                        self._total_usage[key] += usage.get(key, 0)
+                consecutive_errors = 0
 
             except Exception as e:
-                # LLM error - record and continue with wait action
-                raw_response = ""
-                thought = f"LLM error: {e}"
-                action = BrowserAction(action_type="wait", params={"seconds": 1})
-                action_result = "LLM call failed"
+                consecutive_errors += 1
+                log("Agent", f"LLM error ({consecutive_errors}/3): {type(e).__name__}", force=True)
 
-                trajectory.append(TrajectoryStep(
+                self._trajectory.append(TrajectoryStep(
                     step_num=step_num,
-                    observation=obs,
-                    thought=thought,
-                    action=action,
-                    action_result=action_result,
+                    observation=current_obs,
+                    thought=f"LLM error: {e}",
+                    action=BrowserAction(action_type="wait", params={"seconds": 2}),
+                    action_result="LLM call failed",
                 ))
-                obs = await self._session.execute_action(action)
+
+                if consecutive_errors >= 3:
+                    break
+
+                obs = await self._session.execute_action(
+                    BrowserAction(action_type="wait", params={"seconds": 2})
+                )
                 continue
 
-            # Parse response
             thought, action = self._policy.parse_response(raw_response)
 
-            # Save observation before action execution (what Agent saw when making decision)
-            obs_before_action = obs
-
             if action is None:
-                # Parse failed - default to wait
                 action = BrowserAction(action_type="wait", params={"seconds": 0.5})
-                action_result = "Parse failed, waiting"
+                action_result = "Parse failed"
             elif action.action_type == "stop":
-                # Extract final answer and finish
                 final_params = action.params.get("final", {})
-                final_answer = final_params if final_params else action.params
-                action_result = "Task completed"
+                self._final_answer = final_params if final_params else action.params
+                log("Agent", f"Completed: {self._final_answer}")
 
-                trajectory.append(TrajectoryStep(
+                self._trajectory.append(TrajectoryStep(
                     step_num=step_num,
-                    observation=obs_before_action,
+                    observation=current_obs,
                     thought=thought,
                     action=action,
-                    action_result=action_result,
+                    action_result="Task completed",
                 ))
                 break
             else:
-                # Execute action
+                log("Agent", f"Action: {action.action_type}")
                 try:
-                    new_obs = await self._session.execute_action(action)
+                    obs = await self._session.execute_action(action)
                     action_result = "Success"
-                    obs = new_obs
                 except Exception as e:
-                    action_result = f"Action failed: {e}"
+                    action_result = f"Failed: {e}"
 
-            # Record step with observation BEFORE action (what Agent saw)
-            trajectory.append(TrajectoryStep(
+            self._trajectory.append(TrajectoryStep(
                 step_num=step_num,
-                observation=obs_before_action,
+                observation=current_obs,
                 thought=thought,
                 action=action,
                 action_result=action_result,
             ))
 
-        return trajectory, final_answer, total_usage if any(total_usage.values()) else None
+        log("Agent", f"Finished with {len(self._trajectory)} steps")
+        return self._trajectory, self._final_answer, self.get_usage()

@@ -302,6 +302,9 @@ class StockPlugin(BasePlugin):
 - [x] Template-based question generation
 - [x] LLM-based answer validation
 - [x] Conversation history tracking
+- [x] Parallel answer validation
+- [x] Ground truth fetch with retry mechanism
+- [x] Browser session isolation modes (shared/strict)
 
 ### Phase 2: Plugin Expansion
 - [ ] Stock plugin (Yahoo Finance, Google Finance)
@@ -312,12 +315,11 @@ class StockPlugin(BasePlugin):
 ### Phase 3: Advanced Features
 - [ ] Multi-step reasoning tasks
 - [ ] Cross-plugin composite tasks
-- [ ] Difficulty levels
 - [ ] Human evaluation integration
 - [ ] Leaderboard and benchmark suite
 
 ### Phase 4: Optimization
-- [ ] Parallel evaluation
+- [ ] Parallel evaluation (multiple tasks concurrently)
 - [ ] Caching for ground truth
 - [ ] Reduced token usage
 - [ ] Faster validation models

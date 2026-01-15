@@ -16,11 +16,14 @@ class BrowserSession:
     """
     Isolated browser session (context + page).
     Each evaluate() call creates a new session to avoid state interference.
+
+    In strict isolation mode, the session owns its own browser instance.
     """
 
-    def __init__(self, context: BrowserContext, page: Page):
+    def __init__(self, context: BrowserContext, page: Page, browser: Browser = None):
         self._context = context
         self._page = page
+        self._browser = browser  # Only set in strict isolation mode
 
     async def goto(self, url: str) -> BrowserObservation:
         """Navigate to URL and return observation"""
@@ -220,7 +223,7 @@ class BrowserSession:
         return "\n".join(lines)
 
     async def close(self):
-        """Close session (context and page)"""
+        """Close session (context, page, and browser if in strict mode)"""
         try:
             await self._page.close()
         except Exception:
@@ -229,50 +232,95 @@ class BrowserSession:
             await self._context.close()
         except Exception:
             pass
+        # In strict isolation mode, also close the browser instance
+        if self._browser is not None:
+            try:
+                await self._browser.close()
+            except Exception:
+                pass
 
 
 class BrowserEngine:
     """
     Browser engine that manages Playwright and Browser instances.
-    Shared across evaluations, but each evaluation gets an isolated session.
+
+    Supports two isolation modes:
+    - shared: Single browser instance, isolated contexts (default, faster)
+    - strict: Separate browser instance per session (stronger isolation)
     """
 
-    def __init__(self, headless: bool = True):
+    def __init__(self, headless: bool = True, isolation_mode: str = "shared"):
+        """
+        Initialize browser engine.
+
+        Args:
+            headless: Run browser in headless mode
+            isolation_mode: "shared" (default) or "strict"
+                - shared: Single browser, separate contexts (faster, good for most cases)
+                - strict: Separate browser per session (stronger isolation, slower)
+        """
         self._headless = headless
+        self._isolation_mode = isolation_mode
         self._playwright: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
         self._lock = asyncio.Lock()
+        self._browser_args = [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+        ]
 
     async def start(self):
-        """Start Playwright and launch browser"""
+        """Start Playwright and launch browser (for shared mode)"""
         async with self._lock:
             if self._playwright is None:
                 self._playwright = await async_playwright().start()
+
+            if self._isolation_mode == "shared" and self._browser is None:
                 self._browser = await self._playwright.chromium.launch(
                     headless=self._headless,
-                    args=[
-                        "--no-sandbox",
-                        "--disable-setuid-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-gpu",
-                    ]
+                    args=self._browser_args,
                 )
 
     async def new_session(self) -> BrowserSession:
         """Create a new isolated browser session"""
-        if self._browser is None:
+        if self._playwright is None:
             await self.start()
 
-        # Create new context and page for isolation
-        context = await self._browser.new_context(
-            viewport={"width": 1280, "height": 720},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        context.set_default_timeout(PAGE_TIMEOUT_MS)
+        if self._isolation_mode == "strict":
+            # Strict mode: create a new browser instance for each session
+            browser = await self._playwright.chromium.launch(
+                headless=self._headless,
+                args=self._browser_args,
+            )
+            context = await browser.new_context(
+                viewport={"width": 1280, "height": 720},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                # Additional isolation options
+                ignore_https_errors=False,
+                java_script_enabled=True,
+                bypass_csp=False,
+            )
+            context.set_default_timeout(PAGE_TIMEOUT_MS)
+            page = await context.new_page()
+            return BrowserSession(context, page, browser=browser)
+        else:
+            # Shared mode: use shared browser with isolated context
+            if self._browser is None:
+                await self.start()
 
-        page = await context.new_page()
-
-        return BrowserSession(context, page)
+            context = await self._browser.new_context(
+                viewport={"width": 1280, "height": 720},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                # Context-level isolation options
+                ignore_https_errors=False,
+                java_script_enabled=True,
+                bypass_csp=False,
+            )
+            context.set_default_timeout(PAGE_TIMEOUT_MS)
+            page = await context.new_page()
+            return BrowserSession(context, page)
 
     async def stop(self):
         """Stop browser and Playwright"""

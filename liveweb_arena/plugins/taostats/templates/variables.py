@@ -15,7 +15,7 @@ class SubnetMetric(Enum):
     EMISSION = "emission"
     REGISTRATION_COST = "registration_cost"
     PRICE = "price"  # Alpha token price
-    TEMPO = "tempo"  # Block interval
+    # Note: TEMPO removed - not displayed on taostats.io
     GITHUB_REPO = "github_repo"  # GitHub repository URL
 
 
@@ -24,6 +24,7 @@ class SubnetSpec:
     """Specification for a subnet"""
     subnet_id: int
     display_name: str
+    subnet_name: str = ""  # Real subnet name from chain
 
 
 @dataclass
@@ -36,8 +37,9 @@ class MetricSpec:
     tolerance_pct: float = 10.0  # Percentage tolerance for numeric validation
 
 
-# Cache for subnet IDs to avoid repeated network calls
+# Cache for subnet data to avoid repeated network calls
 _subnet_ids_cache: Optional[List[int]] = None
+_subnet_names_cache: Dict[int, str] = {}
 
 
 def _fetch_active_subnet_ids() -> List[int]:
@@ -57,6 +59,25 @@ def _fetch_active_subnet_ids() -> List[int]:
     except Exception:
         # Fallback: use range 1-128 (max possible subnets)
         return list(range(1, 129))
+
+
+def _fetch_subnet_name(subnet_id: int) -> str:
+    """Fetch subnet name from Bittensor network with caching."""
+    global _subnet_names_cache
+    if subnet_id in _subnet_names_cache:
+        return _subnet_names_cache[subnet_id]
+
+    try:
+        import bittensor as bt
+        subtensor = bt.Subtensor(network="finney")
+        info = subtensor.subnet(subnet_id)
+        name = info.subnet_name or (
+            info.subnet_identity.subnet_name if info.subnet_identity else ""
+        )
+        _subnet_names_cache[subnet_id] = name
+        return name
+    except Exception:
+        return ""
 
 
 class SubnetVariable(Variable):
@@ -86,7 +107,9 @@ class SubnetVariable(Variable):
         # Vary display format
         formats = [f"subnet {subnet_id}", f"SN{subnet_id}", f"Subnet {subnet_id}"]
         display = rng.choice(formats)
-        return SubnetSpec(subnet_id=subnet_id, display_name=display)
+        # Get real subnet name from chain
+        subnet_name = _fetch_subnet_name(subnet_id)
+        return SubnetSpec(subnet_id=subnet_id, display_name=display, subnet_name=subnet_name)
 
     def get_display_value(self, value: SubnetSpec) -> str:
         return value.display_name
@@ -117,10 +140,7 @@ class MetricVariable(Variable):
             SubnetMetric.PRICE, "alpha price", unit="τ", is_numeric=True,
             tolerance_pct=10.0
         ),
-        SubnetMetric.TEMPO: MetricSpec(
-            SubnetMetric.TEMPO, "tempo", unit="blocks", is_numeric=True,
-            tolerance_pct=0.0  # Tempo is exact, no tolerance needed
-        ),
+        # Note: TEMPO removed - not displayed on taostats.io
         SubnetMetric.GITHUB_REPO: MetricSpec(
             SubnetMetric.GITHUB_REPO, "GitHub repository", is_numeric=False
         ),

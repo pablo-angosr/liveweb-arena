@@ -9,6 +9,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
     Variable, VariableType
 )
+from .variables import SubnetVariable
 
 
 class RankingMetric(Enum):
@@ -33,62 +34,23 @@ class SubnetNameSpec:
     subnet_name: str
 
 
-# Well-known subnets with stable names (manually curated for reliability)
-# These are popular subnets that are unlikely to be renamed or removed
-KNOWN_SUBNETS: Dict[int, str] = {
-    1: "Apex",
-    2: "Omron",
-    3: "Templar",
-    4: "Targon",
-    5: "Kaito",
-    6: "Infinite Games",
-    7: "Subvortex",
-    8: "Taoshi",
-    9: "Pretraining",
-    10: "Sturdy",
-    11: "Dippy",
-    12: "Horde",
-    13: "Dataverse",
-    14: "Sybil",
-    15: "Deval",
-    16: "BitAgent",
-    17: "404 - Gen",
-    18: "Cortex.t",
-    19: "Namorai",
-    20: "BitMind",
-    21: "Any-Any",
-    22: "Datura",
-    23: "NicheImage",
-    24: "Omega",
-    25: "Protein Folding",
-    26: "Proprietary Trading Network",
-    27: "Nodexo",
-    32: "ItsAI",
-    33: "Ready Player Me",
-    37: "Finetuning",
-    42: "Masa",
-    47: "Condense AI",
-    53: "Yogabyte",
-    61: "RedPill",
-    64: "SocialTensor",
-}
-
-
 class SubnetNameVariable(Variable):
-    """Variable for subnet selection by name (for ranking questions)"""
+    """Variable for subnet selection by name (for ranking questions).
+
+    Uses SubnetVariable to get real subnet names from the Bittensor network,
+    ensuring names are always up-to-date.
+    """
 
     def __init__(self):
         super().__init__("subnet_name", VariableType.TEXT)
-
-    @property
-    def subnet_names(self) -> Dict[int, str]:
-        return KNOWN_SUBNETS
+        self._subnet_var = SubnetVariable()
 
     def sample(self, rng: random.Random) -> SubnetNameSpec:
-        subnet_id = rng.choice(list(KNOWN_SUBNETS.keys()))
+        """Sample a subnet and get its real name from the network."""
+        subnet_spec = self._subnet_var.sample(rng)
         return SubnetNameSpec(
-            subnet_id=subnet_id,
-            subnet_name=KNOWN_SUBNETS[subnet_id]
+            subnet_id=subnet_spec.subnet_id,
+            subnet_name=subnet_spec.subnet_name
         )
 
     def get_display_value(self, value: SubnetNameSpec) -> str:

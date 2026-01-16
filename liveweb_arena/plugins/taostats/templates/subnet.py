@@ -43,11 +43,7 @@ class SubnetInfoTemplate(QuestionTemplate):
             "What is the alpha price of {subnet}?",
             "What's the current alpha token price for {subnet}?",
         ],
-        SubnetMetric.TEMPO: [
-            "What is the tempo of {subnet}?",
-            "What's the block interval for {subnet}?",
-            "How many blocks per epoch does {subnet} use?",
-        ],
+        # Note: TEMPO removed - not displayed on taostats.io
         SubnetMetric.GITHUB_REPO: [
             "What is the GitHub repository for {subnet}?",
             "Where can I find the source code for {subnet}?",
@@ -72,9 +68,7 @@ class SubnetInfoTemplate(QuestionTemplate):
         self.register_validator("price", NumericToleranceValidator(
             full_tolerance=0.0001, partial_tolerance=0.001, unit="τ"
         ))
-        self.register_validator("tempo", NumericToleranceValidator(
-            full_tolerance=0, partial_tolerance=0, unit="blocks"  # Exact match for tempo
-        ))
+        # Note: tempo validator removed - not displayed on taostats.io
         self.register_validator("github_repo", ExactMatchValidator(case_sensitive=False))
 
     def generate(self, seed: int) -> GeneratedQuestion:
@@ -112,14 +106,30 @@ class SubnetInfoTemplate(QuestionTemplate):
 - Score 0.0: Different names"""
 
         if metric == "owner":
-            return """Task-Specific Rules (Subnet Owner):
-- Score 1.0: Addresses match (truncated format acceptable)
-- Score 0.0: Different addresses"""
+            return """Task-Specific Rules (Subnet Owner Address):
+- Score 1.0: Agent provides COMPLETE address (48 characters starting with 5, matching expected)
+- Score 0.5: Agent provides truncated address with "..." that matches start AND end of expected address
+- Score 0.0: Address doesn't match, or agent provides only the default truncated display from webpage without verifying
 
-        if metric == "tempo":
-            return """Task-Specific Rules (Tempo):
-- Score 1.0: Exact numeric match
-- Score 0.0: Different values"""
+IMPORTANT: The webpage shows truncated addresses by default (e.g., "5DWgkC...uS9Qad").
+Simply copying this truncated format is NOT sufficient for full score.
+Agent should click the address to get the full address from the URL or account page."""
+
+        if metric == "emission":
+            return """Task-Specific Rules (Emission):
+- Score 1.0: Agent provides a specific emission percentage (e.g., "0.33%", "2.57%")
+- Score 0.5: Agent provides emission in different format but appears to be real data
+- Score 0.0: No data, error, or clearly implausible value
+
+Note: Emission values shown on taostats are percentages of total network emission."""
+
+        if metric == "registration_cost":
+            return """Task-Specific Rules (Registration Cost):
+- Score 1.0: Agent provides a specific cost value (e.g., "0.06 TAO", "0.00 TAO")
+- Score 0.5: Agent provides cost in different format but appears to be real data
+- Score 0.0: No data, error, or clearly implausible value"""
+
+        # Note: tempo removed - not displayed on taostats.io
 
         if metric == "github_repo":
             return """Task-Specific Rules (GitHub Repository):
@@ -153,15 +163,15 @@ class SubnetInfoTemplate(QuestionTemplate):
             elif metric == "owner":
                 return info.owner_coldkey
             elif metric == "emission":
-                # Return emission value
-                return str(info.emission)
+                # SDK returns raw TAO value, but website shows percentage of total emission
+                # These are different metrics, so use LLM validation
+                return None
             elif metric == "registration_cost":
                 burn = subtensor.get_subnet_burn_cost(subnet_id)
                 return f"τ{burn.tao:.6f}" if burn else None
             elif metric == "price":
                 return f"τ{info.price:.6f}" if info.price else None
-            elif metric == "tempo":
-                return str(info.tempo)
+            # Note: tempo removed - not displayed on taostats.io
             elif metric == "github_repo":
                 if info.subnet_identity and info.subnet_identity.github_repo:
                     return info.subnet_identity.github_repo

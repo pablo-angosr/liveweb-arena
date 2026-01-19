@@ -136,13 +136,13 @@ class Stooq52WeekTemplate(QuestionTemplate):
 
         if query_type in ["high_price", "low_price"]:
             return f"""Task-Specific Rules (52-Week {rule}):
-- Score 1.0: Price matches within 3% tolerance
-- Score 0.0: Price differs by more than 3%"""
+- Score 1.0: Price matches within 5% tolerance
+- Score 0.0: Price differs by more than 5%"""
 
         elif query_type in ["distance_from_high", "distance_from_low"]:
             return f"""Task-Specific Rules (52-Week {rule}):
-- Score 1.0: Percentage matches within 3 percentage points
-- Score 0.0: Percentage differs by more than 3 percentage points"""
+- Score 1.0: Percentage matches within 5 percentage points
+- Score 0.0: Percentage differs by more than 5 percentage points"""
 
         else:  # closer_to
             return f"""Task-Specific Rules (52-Week {rule}):
@@ -346,20 +346,20 @@ class Stooq52WeekTemplate(QuestionTemplate):
                 num = float(num_str)
 
                 if query_type in ["high_price", "low_price"]:
-                    # Price: 3% tolerance
+                    # Price: 5% tolerance (accounts for CSV vs webpage display differences)
                     if expected_value == 0:
                         continue
                     pct_diff = abs(num - expected_value) / expected_value * 100
-                    if pct_diff <= 3:
+                    if pct_diff <= 5:
                         score = 1.0
                     else:
                         score = 0.0
                     diff = pct_diff
 
                 else:  # distance_from_high, distance_from_low
-                    # Percentage: 3 percentage points tolerance
+                    # Percentage: 5 percentage points tolerance
                     diff = abs(num - abs(expected_value))
-                    if diff <= 3:
+                    if diff <= 5:
                         score = 1.0
                     else:
                         score = 0.0

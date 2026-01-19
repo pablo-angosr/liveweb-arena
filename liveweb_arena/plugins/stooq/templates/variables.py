@@ -88,13 +88,17 @@ US_STOCKS = [
     StockSpec("intc.us", "Intel (INTC)", "US"),
 ]
 
-# Major global indices (verified symbols that agents can reliably navigate to)
+# Major global indices
 INDICES = [
     IndexSpec("^dji", "Dow Jones Industrial Average", "US"),
     IndexSpec("^spx", "S&P 500", "US"),
     IndexSpec("^ndx", "NASDAQ 100", "US"),
+    IndexSpec("^ukx", "FTSE 100", "Europe"),
     IndexSpec("^dax", "DAX", "Europe"),
+    IndexSpec("^cac", "CAC 40", "Europe"),
     IndexSpec("^nkx", "Nikkei 225", "Asia"),
+    IndexSpec("^hsi", "Hang Seng Index", "Asia"),
+    IndexSpec("^kospi", "KOSPI", "Asia"),
 ]
 
 # Major currency pairs

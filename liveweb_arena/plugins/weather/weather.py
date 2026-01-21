@@ -21,7 +21,7 @@ class WeatherPlugin(BasePlugin):
     """
 
     # Weather-specific template names
-    WEATHER_TEMPLATES = {"location_name", "multi_day", "time_of_day"}
+    WEATHER_TEMPLATES = {"location_name", "current_weather", "multi_day", "time_of_day", "astronomy"}
 
     def __init__(self, templates: List[str] = None, use_chinese: bool = False):
         self.use_chinese = use_chinese
@@ -60,11 +60,23 @@ class WeatherPlugin(BasePlugin):
     def usage_hint(self) -> str:
         return """## wttr.in (Weather)
 - URL: https://wttr.in/{city} (e.g., /London, /New+York, /~Eiffel+Tower)
-- Shows current conditions + 3-day forecast with 4 time periods per day
-- Time periods: Morning (06:00), Noon (12:00), Evening (18:00), Night (00:00)
+- HTML page shows current conditions + 3-day forecast with 4 time periods per day
+- Time periods: Morning (09:00), Noon (12:00), Evening (18:00), Night (21:00)
 - Temperature format: +25(28)°C means 25°C actual, 28°C feels-like
-- Each time period shows: temperature, wind, humidity, precipitation chance
-- For humidity: use ?format=j1 for JSON with `weather[0..2].hourly[*].humidity`
+
+**v2 format: https://v2.wttr.in/{city}**
+- Enhanced display with temperature graph, precipitation bars, moon phases
+- Shows sunrise/sunset times at the bottom: "Sunrise: 06:47:36 | Sunset: 17:01:59"
+
+**JSON API: https://wttr.in/{city}?format=j1**
+This API provides comprehensive weather data including:
+- `current_condition`: Real-time temperature, humidity, wind, pressure, UV index, visibility
+- `weather[0..2]`: 3-day forecast with daily max/min/avg temperatures
+- `weather[*].hourly`: 8 time slots per day (0,3,6,9,12,15,18,21 hours)
+- `weather[*].astronomy`: Sunrise/sunset, moonrise/moonset, moon phase
+- Hourly data includes: temperature, feels-like, dew point, wind chill, heat index,
+  wind speed/direction/gusts, precipitation, humidity, cloud cover, UV, visibility,
+  and probability forecasts (rain, snow, thunder, fog, frost, overcast, sunshine)
 """
 
     async def generate_task(

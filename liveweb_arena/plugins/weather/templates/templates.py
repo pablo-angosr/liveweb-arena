@@ -12,7 +12,7 @@ from liveweb_arena.core.ground_truth_trigger import (
 )
 from .variables import (
     LocationVariable, DateVariable, WeatherMetricVariable,
-    LocationType, MetricType,
+    LocationType, MetricType, DateType,
     LocationSpec, DateSpec, MetricSpec,
 )
 
@@ -75,15 +75,16 @@ class LocationNameWeatherTemplate(QuestionTemplate):
         ))
         self.register_variable(DateVariable(
             max_forecast_days=2,  # wttr.in only provides 3 days (0, 1, 2)
+            allowed_types=[DateType.TODAY, DateType.TOMORROW],  # NOW handled by CurrentWeatherTemplate
             use_chinese=use_chinese,
         ))
+        # Note: HUMIDITY and WIND_SPEED removed - they require specific time periods
+        # Use TimeOfDayWeatherTemplate for those metrics
         self.register_variable(WeatherMetricVariable(
             allowed_metrics=allowed_metrics or [
                 MetricType.TEMPERATURE,
                 MetricType.TEMPERATURE_HIGH,
                 MetricType.TEMPERATURE_LOW,
-                MetricType.WIND_SPEED,
-                MetricType.HUMIDITY,
                 MetricType.PRECIPITATION_CHANCE,
                 MetricType.HAS_RAIN,
             ]
@@ -110,7 +111,6 @@ class LocationNameWeatherTemplate(QuestionTemplate):
             )
 
         for metric_type in [
-            MetricType.HUMIDITY, MetricType.WIND_SPEED,
             MetricType.PRECIPITATION_CHANCE, MetricType.CLOUD_COVER,
         ]:
             spec = WeatherMetricVariable.METRICS[metric_type]
@@ -170,8 +170,7 @@ class LocationNameWeatherTemplate(QuestionTemplate):
         # Build validation info
         validation_info = {
             "location": location.api_query,
-            "date": date.api_date,
-            "forecast_day": date.forecast_day,
+            "target_date": date.api_date,  # Absolute date for timezone-safe matching
             "metric_type": metric.metric_type.value,
             "api_field": metric.api_field,
             "is_boolean": metric.is_boolean,
@@ -256,7 +255,7 @@ class LocationNameWeatherTemplate(QuestionTemplate):
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Any:
         """Fetch ground truth from wttr.in API"""
         location = validation_info["location"]
-        forecast_day = validation_info["forecast_day"]
+        target_date = validation_info["target_date"]  # YYYY-MM-DD format or "now"
         api_field = validation_info["api_field"]
         is_boolean = validation_info.get("is_boolean", False)
         unit = validation_info.get("unit", "")
@@ -268,50 +267,68 @@ class LocationNameWeatherTemplate(QuestionTemplate):
             response.raise_for_status()
             data = response.json()
 
-        weather = data.get("weather", [])
         value = None
+
+        # Handle "now" queries - use current_condition
+        if target_date == "now":
+            current = data.get("current_condition", [{}])[0]
+            value = current.get(api_field)
+
+            # Convert boolean for rain questions (use weatherDesc for current)
+            if is_boolean and value is not None:
+                return "Yes" if float(value) > 30 else "No"
+
+            if value is not None and unit:
+                return f"{value}{unit}"
+            return value
+
+        # For date-based queries, find day by date (timezone-safe)
+        weather = data.get("weather", [])
+        day_data = None
+        is_today = False
+        for i, day in enumerate(weather):
+            if day.get("date") == target_date:
+                day_data = day
+                is_today = (i == 0)
+                break
+
+        if day_data is None:
+            return None
 
         # For metrics shown on HTML page, use only the 4 displayed time slots
         # HTML shows Morning(9:00)/Noon(12:00)/Evening(18:00)/Night(21:00) = indices 3,4,6,7
         display_indices = [3, 4, 6, 7]
+        hourly = day_data.get("hourly", [])
 
-        if api_field in ("maxtempC", "mintempC") and forecast_day < len(weather):
-            day_data = weather[forecast_day]
-            hourly = day_data.get("hourly", [])
+        if api_field in ("maxtempC", "mintempC"):
             if hourly and len(hourly) >= 8:
                 temps = [int(hourly[i].get("tempC", 0)) for i in display_indices if hourly[i].get("tempC")]
                 if temps:
                     value = max(temps) if api_field == "maxtempC" else min(temps)
-        elif api_field == "chanceofrain" and forecast_day < len(weather):
+        elif api_field == "chanceofrain":
             # For chance of rain, use MAX of displayed time slots (if any slot has 100%, it will rain)
-            day_data = weather[forecast_day]
-            hourly = day_data.get("hourly", [])
             if hourly and len(hourly) >= 8:
                 chances = [int(hourly[i].get("chanceofrain", 0)) for i in display_indices]
                 if chances:
                     value = max(chances)
-        elif forecast_day == 0:
-            # Current conditions
+        elif is_today:
+            # Current conditions for today
             current = data.get("current_condition", [{}])[0]
             value = current.get(api_field)
 
             # If not in current, check today's forecast
-            if value is None and weather:
-                value = weather[0].get(api_field)
+            if value is None:
+                value = day_data.get(api_field)
         else:
             # Future forecast
-            if forecast_day < len(weather):
-                day_data = weather[forecast_day]
-                value = day_data.get(api_field)
+            value = day_data.get(api_field)
 
-                # Some fields are in hourly data
-                if value is None:
-                    hourly = day_data.get("hourly", [])
-                    if hourly:
-                        # Average over hourly values
-                        values = [float(h.get(api_field, 0)) for h in hourly if h.get(api_field)]
-                        if values:
-                            value = sum(values) / len(values)
+            # Some fields are in hourly data
+            if value is None and hourly:
+                # Average over hourly values
+                values = [float(h.get(api_field, 0)) for h in hourly if h.get(api_field)]
+                if values:
+                    value = sum(values) / len(values)
 
         # Convert boolean for rain questions
         if is_boolean and value is not None:
@@ -370,6 +387,210 @@ class LocationNameWeatherTemplate(QuestionTemplate):
         location = validation_info.get("location", "")
         # Extract city name (first part before comma) for more flexible matching
         # e.g., "Nairobi,Kenya" -> "Nairobi"
+        city_name = location.split(",")[0].strip() if location else ""
+        trigger = UrlPatternTrigger(
+            domains=["wttr.in"],
+            url_contains=city_name if city_name else None,
+        )
+        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.FIRST)
+
+
+@register_template("current_weather")
+class CurrentWeatherTemplate(QuestionTemplate):
+    """
+    Template for current/real-time weather queries.
+
+    Uses wttr.in's current_condition data for real-time measurements.
+    Only supports metrics that make sense for current conditions
+    (not daily aggregates like high/low temperature).
+
+    Examples:
+    - What is the temperature in Tokyo right now?
+    - What is the current humidity in London?
+    - How windy is it in New York right now?
+    """
+
+    QUESTION_PATTERNS = [
+        "What is the {metric} in {location} right now?",
+        "What is the current {metric} in {location}?",
+        "How {metric_adj} is it in {location} right now?",
+        "What's the {metric} in {location} at this moment?",
+    ]
+
+    QUESTION_PATTERNS_ZH = [
+        "{location}现在的{metric}是多少？",
+        "{location}目前的{metric}是多少？",
+        "现在{location}的{metric}是多少？",
+    ]
+
+    def __init__(self, use_chinese: bool = False, regions: List[str] = None):
+        super().__init__("current_weather")
+        self.use_chinese = use_chinese
+
+        # Register variables
+        self.register_variable(LocationVariable(
+            allowed_types=[LocationType.CITY_NAME],
+            regions=regions,
+        ))
+        # Current conditions support these real-time metrics
+        self.register_variable(WeatherMetricVariable(
+            allowed_metrics=[
+                MetricType.TEMPERATURE,
+                MetricType.FEELS_LIKE,
+                MetricType.HUMIDITY,
+                MetricType.WIND_SPEED,
+            ]
+        ))
+
+        # Register validators
+        for metric_type in [MetricType.TEMPERATURE, MetricType.FEELS_LIKE]:
+            spec = WeatherMetricVariable.METRICS[metric_type]
+            self.register_validator(metric_type.value, NumericToleranceValidator(
+                full_tolerance=spec.full_tolerance,
+                partial_tolerance=spec.partial_tolerance,
+                unit=spec.unit,
+            ))
+        for metric_type in [MetricType.HUMIDITY, MetricType.WIND_SPEED]:
+            spec = WeatherMetricVariable.METRICS[metric_type]
+            self.register_validator(metric_type.value, NumericToleranceValidator(
+                full_tolerance=spec.full_tolerance,
+                partial_tolerance=spec.partial_tolerance,
+                unit=spec.unit,
+            ))
+
+    def generate(self, seed: int, variant: Optional[int] = None) -> GeneratedQuestion:
+        """Generate a current weather question."""
+        rng = random.Random(seed)
+
+        location: LocationSpec = self._variables["location"].sample(rng)
+
+        if variant is not None:
+            metric: MetricSpec = self._variables["metric"].sample_by_index(variant)
+        else:
+            metric: MetricSpec = self._variables["metric"].sample(rng)
+
+        question_text = self._build_question(location, metric, rng)
+        start_url = f"https://wttr.in/{location.api_query}"
+
+        validation_info = {
+            "location": location.api_query,
+            "target_date": "now",  # Special marker for current conditions
+            "metric_type": metric.metric_type.value,
+            "api_field": metric.api_field,
+            "unit": metric.unit,
+        }
+
+        return GeneratedQuestion(
+            question_text=question_text,
+            start_url=start_url,
+            variables={"location": location, "metric": metric},
+            validation_info=validation_info,
+            template_name=self.name,
+        )
+
+    def _build_question(
+        self,
+        location: LocationSpec,
+        metric: MetricSpec,
+        rng: random.Random,
+    ) -> str:
+        patterns = self.QUESTION_PATTERNS_ZH if self.use_chinese else self.QUESTION_PATTERNS
+
+        metric_adj_map = {
+            "temperature": "warm",
+            "feels_like": "warm (feels like)",
+            "humidity": "humid",
+            "wind_speed": "windy",
+        }
+        metric_adj = metric_adj_map.get(metric.metric_type.value, metric.display_name)
+
+        pattern = rng.choice(patterns)
+        return pattern.format(
+            location=location.display_name,
+            metric=metric.display_name,
+            metric_adj=metric_adj,
+        )
+
+    def get_validation_rules(self, validation_info: Dict[str, Any]) -> str:
+        metric_type = validation_info.get("metric_type", "")
+
+        if "temp" in metric_type.lower():
+            return """Task-Specific Rules (Current Weather - Temperature):
+- Question asks for current/real-time temperature
+- Score 1.0: Values match within 2°C
+- Score 0.0: Difference exceeds 2°C"""
+
+        if "humidity" in metric_type.lower():
+            return """Task-Specific Rules (Current Weather - Humidity):
+- Question asks for current humidity percentage
+- Score 1.0: Values match within 5%
+- Score 0.0: Difference exceeds 5%"""
+
+        if "wind" in metric_type.lower():
+            return """Task-Specific Rules (Current Weather - Wind Speed):
+- Question asks for current wind speed
+- Score 1.0: Values match within 5 km/h
+- Score 0.0: Difference exceeds 5 km/h"""
+
+        return """Task-Specific Rules (Current Weather):
+- Score 1.0: Values match within tolerance
+- Score 0.0: Values differ significantly"""
+
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Any:
+        """Fetch current conditions from wttr.in API"""
+        location = validation_info["location"]
+        api_field = validation_info["api_field"]
+        unit = validation_info.get("unit", "")
+
+        url = f"https://wttr.in/{location}?format=j1"
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            data = response.json()
+
+        current = data.get("current_condition", [{}])[0]
+        value = current.get(api_field)
+
+        if value is not None and unit:
+            return f"{value}{unit}"
+        return value
+
+    async def validate_answer(
+        self,
+        answer: str,
+        validation_info: Dict[str, Any]
+    ) -> ValidationResult:
+        """Validate answer against current conditions"""
+        try:
+            ground_truth = await self.get_ground_truth(validation_info)
+        except Exception as e:
+            return ValidationResult(
+                score=0.0,
+                is_correct=False,
+                expected=None,
+                actual=answer,
+                details=f"Failed to get ground truth: {e}",
+            )
+
+        metric_type = validation_info["metric_type"]
+        validator = self._validators.get(metric_type)
+
+        if validator is None:
+            validator = NumericToleranceValidator(2, 5, validation_info.get("unit", ""))
+
+        return validator.validate(answer, ground_truth)
+
+    def get_ground_truth_trigger(
+        self,
+        validation_info: Dict[str, Any]
+    ) -> TriggerConfig:
+        """
+        Current weather: fetch when AI visits the location's page.
+
+        Strategy: FIRST - current conditions at visit time is the reference.
+        """
+        location = validation_info.get("location", "")
         city_name = location.split(",")[0].strip() if location else ""
         trigger = UrlPatternTrigger(
             domains=["wttr.in"],

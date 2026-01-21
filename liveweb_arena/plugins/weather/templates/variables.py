@@ -196,6 +196,7 @@ class LocationVariable(Variable):
 
 class DateType(Enum):
     """Types of date specifications"""
+    NOW = "now"  # Current/real-time conditions
     TODAY = "today"
     TOMORROW = "tomorrow"
     SPECIFIC_DATE = "specific_date"
@@ -251,7 +252,16 @@ class DateVariable(Variable):
         date_type = rng.choice(self.allowed_types)
         today = datetime.now().date()
 
-        if date_type == DateType.TODAY:
+        if date_type == DateType.NOW:
+            return DateSpec(
+                date_type=DateType.NOW,
+                value=None,  # No specific date, real-time
+                display_text="right now" if not self.use_chinese else "现在",
+                api_date="now",  # Special marker for current conditions
+                forecast_day=-1,  # Indicates current conditions, not forecast
+            )
+
+        elif date_type == DateType.TODAY:
             return DateSpec(
                 date_type=DateType.TODAY,
                 value=today,

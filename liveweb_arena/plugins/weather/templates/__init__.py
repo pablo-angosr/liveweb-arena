@@ -1,8 +1,9 @@
 """Weather-specific question templates"""
 
 # Import templates to trigger registration via @register_template decorator
-from .templates import LocationNameWeatherTemplate, MultiDayWeatherTemplate
+from .templates import LocationNameWeatherTemplate, CurrentWeatherTemplate, MultiDayWeatherTemplate
 from .time_of_day import TimeOfDayWeatherTemplate
+from .astronomy import AstronomyTemplate
 
 # Re-export registration utilities from core
 from liveweb_arena.core.validators.base import register_template, get_registered_templates, get_template
@@ -16,8 +17,10 @@ from .variables import (
 __all__ = [
     # Templates
     "LocationNameWeatherTemplate",
+    "CurrentWeatherTemplate",
     "MultiDayWeatherTemplate",
     "TimeOfDayWeatherTemplate",
+    "AstronomyTemplate",
     # Registration utilities
     "register_template",
     "get_registered_templates",

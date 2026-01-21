@@ -86,7 +86,7 @@ class TimeOfDayWeatherTemplate(QuestionTemplate):
 
         validation_info = {
             "location": location.api_query,
-            "forecast_day": date.forecast_day,
+            "target_date": date.api_date,  # Absolute date for timezone-safe matching
             "time_of_day": time_of_day.time_of_day.value,
             "hourly_indices": time_of_day.hourly_indices,
             "metric_type": metric.metric_type.value,
@@ -151,7 +151,7 @@ class TimeOfDayWeatherTemplate(QuestionTemplate):
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Any:
         location = validation_info["location"]
-        forecast_day = validation_info["forecast_day"]
+        target_date = validation_info["target_date"]  # YYYY-MM-DD format
         hourly_indices = validation_info["hourly_indices"]
         api_field = validation_info["api_field"]
         unit = validation_info.get("unit", "")
@@ -164,10 +164,17 @@ class TimeOfDayWeatherTemplate(QuestionTemplate):
             data = response.json()
 
         weather = data.get("weather", [])
-        if forecast_day >= len(weather):
+
+        # Find day by date (timezone-safe) instead of using array index
+        day_data = None
+        for day in weather:
+            if day.get("date") == target_date:
+                day_data = day
+                break
+
+        if day_data is None:
             return None
 
-        day_data = weather[forecast_day]
         hourly = day_data.get("hourly", [])
 
         # Average values across the time period

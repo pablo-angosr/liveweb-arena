@@ -38,6 +38,8 @@ class TaskRegistry:
         1: ("weather", "location_name"),
         2: ("weather", "time_of_day"),
         3: ("weather", "multi_day"),
+        4: ("weather", "current_weather"),
+        5: ("weather", "astronomy"),
 
         # Stooq templates
         10: ("stooq", "stooq_price"),

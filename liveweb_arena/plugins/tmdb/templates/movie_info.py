@@ -7,7 +7,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 from .variables import MovieVariable, MetricVariable, MovieSpec, MetricSpec, MovieMetric
 from ..api_client import TMDBClient
@@ -151,13 +151,13 @@ class TMDBMovieInfoTemplate(QuestionTemplate):
 
         return ""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch movie data from TMDB API."""
         movie_id = validation_info.get("movie_id", "")
         metric_type = validation_info.get("metric_type", "release_date")
 
         if not movie_id:
-            return None
+            return GroundTruthResult.fail("No movie_id provided")
 
         try:
             if metric_type == "director":
@@ -166,35 +166,35 @@ class TMDBMovieInfoTemplate(QuestionTemplate):
                 data = await TMDBClient.get_movie(movie_id)
 
             if not data:
-                return None
+                return GroundTruthResult.retry("No data returned from TMDB API")
 
             if metric_type == "release_date":
                 release_date = data.get("release_date")
                 if release_date:
-                    return release_date  # YYYY-MM-DD format
+                    return GroundTruthResult.ok(release_date)
 
             elif metric_type == "runtime":
                 runtime = data.get("runtime")
                 if runtime is not None:
-                    return f"{runtime} minutes"
+                    return GroundTruthResult.ok(f"{runtime} minutes")
 
             elif metric_type == "original_language":
                 lang_code = data.get("original_language")
                 if lang_code:
                     lang_name = LANGUAGE_NAMES.get(lang_code, lang_code.upper())
-                    return f"{lang_name} ({lang_code})"
+                    return GroundTruthResult.ok(f"{lang_name} ({lang_code})")
 
             elif metric_type == "director":
                 credits = data.get("credits", {})
                 crew = credits.get("crew", [])
                 directors = [p["name"] for p in crew if p.get("job") == "Director"]
                 if directors:
-                    return ", ".join(directors)
+                    return GroundTruthResult.ok(", ".join(directors))
 
-            return None
+            return GroundTruthResult.fail(f"Missing {metric_type} data")
 
-        except Exception:
-            return None
+        except Exception as e:
+            return GroundTruthResult.retry(f"TMDB API error: {e}")
 
     async def validate_answer(
         self,
@@ -202,17 +202,18 @@ class TMDBMovieInfoTemplate(QuestionTemplate):
         validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate movie info answer."""
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         metric_type = validation_info.get("metric_type", "release_date")
 
         if metric_type == "release_date":

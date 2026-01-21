@@ -10,7 +10,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
 )
 from .variables import (
     StockVariable, IndexVariable, CurrencyVariable, CommodityVariable,
@@ -175,41 +175,40 @@ class StooqPriceTemplate(QuestionTemplate):
 - Score 1.0: Values match within 2% tolerance
 - Score 0.0: Values differ by more than 2%"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """
         Fetch ground truth from Stooq CSV download endpoint.
 
-        Returns the specific metric value as a string for LLM validation.
+        Returns GroundTruthResult with the specific metric value as a string.
         """
         symbol = validation_info.get("symbol", "")
         metric = validation_info.get("metric", "last_price")
         if not symbol:
-            return None
+            return GroundTruthResult.fail("No symbol provided")
 
         try:
-            # Fetch CSV data
             async with aiohttp.ClientSession() as session:
-                params = {"s": symbol, "i": "d"}  # daily data
+                params = {"s": symbol, "i": "d"}
                 async with session.get(
                     self.STOOQ_CSV_URL,
                     params=params,
                     timeout=aiohttp.ClientTimeout(total=15)
                 ) as response:
+                    if response.status == 404:
+                        return GroundTruthResult.fail(f"Symbol {symbol} not found")
+                    if response.status >= 500:
+                        return GroundTruthResult.retry(f"Server error: HTTP {response.status}")
                     if response.status != 200:
-                        return None
+                        return GroundTruthResult.fail(f"HTTP {response.status}")
                     csv_text = await response.text()
 
-            # Parse CSV
             reader = csv.DictReader(io.StringIO(csv_text))
             rows = list(reader)
 
             if not rows:
-                return None
+                return GroundTruthResult.fail("No data in CSV response")
 
-            # Get most recent data (last row)
             latest = rows[-1]
-
-            # Extract price data
             close = self._parse_float(latest.get("Close"))
             open_price = self._parse_float(latest.get("Open"))
             high = self._parse_float(latest.get("High"))
@@ -227,22 +226,40 @@ class StooqPriceTemplate(QuestionTemplate):
 
             # Return the specific metric requested
             if metric == "last_price":
-                return f"{close:.2f}" if close else None
+                if close is None:
+                    return GroundTruthResult.fail("Could not parse close price")
+                return GroundTruthResult.ok(f"{close:.2f}")
             elif metric == "change_percent":
-                return f"{change_pct:+.2f}%" if change_pct is not None else None
+                if change_pct is None:
+                    return GroundTruthResult.fail("Could not calculate change percent")
+                return GroundTruthResult.ok(f"{change_pct:+.2f}%")
             elif metric == "change_absolute":
-                return f"{change:+.2f}" if change is not None else None
+                if change is None:
+                    return GroundTruthResult.fail("Could not calculate change")
+                return GroundTruthResult.ok(f"{change:+.2f}")
             elif metric == "open":
-                return f"{open_price:.2f}" if open_price else None
+                if open_price is None:
+                    return GroundTruthResult.fail("Could not parse open price")
+                return GroundTruthResult.ok(f"{open_price:.2f}")
             elif metric == "high":
-                return f"{high:.2f}" if high else None
+                if high is None:
+                    return GroundTruthResult.fail("Could not parse high price")
+                return GroundTruthResult.ok(f"{high:.2f}")
             elif metric == "low":
-                return f"{low:.2f}" if low else None
+                if low is None:
+                    return GroundTruthResult.fail("Could not parse low price")
+                return GroundTruthResult.ok(f"{low:.2f}")
             else:
-                return f"{close:.2f}" if close else None
+                if close is None:
+                    return GroundTruthResult.fail("Could not parse close price")
+                return GroundTruthResult.ok(f"{close:.2f}")
 
-        except Exception:
-            return None
+        except aiohttp.ClientError as e:
+            return GroundTruthResult.retry(f"Network error: {e}")
+        except TimeoutError:
+            return GroundTruthResult.retry("Request timeout")
+        except Exception as e:
+            return GroundTruthResult.fail(f"Unexpected error: {e}")
 
     def _parse_float(self, value: Any) -> Optional[float]:
         """Parse a value to float, returning None if invalid"""
@@ -257,17 +274,18 @@ class StooqPriceTemplate(QuestionTemplate):
         self, answer: str, validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate price answer against ground truth"""
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         metric = validation_info.get("metric", "last_price")
 
         # Parse expected value from ground truth string

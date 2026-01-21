@@ -12,7 +12,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
 )
 
 
@@ -262,7 +262,7 @@ The agent must:
 2. Collect the relevant metric for all instruments
 3. Rank them correctly and identify the {position} {direction}"""
 
-    async def _fetch_instrument_data(self, symbol: str) -> Optional[Dict[str, Any]]:
+    async def _fetch_instrument_data(self, symbol: str) -> GroundTruthResult:
         """Fetch comprehensive data for a single instrument"""
         try:
             async with aiohttp.ClientSession() as session:
@@ -272,15 +272,19 @@ The agent must:
                     params=params,
                     timeout=aiohttp.ClientTimeout(total=15)
                 ) as response:
+                    if response.status == 404:
+                        return GroundTruthResult.fail(f"Symbol {symbol} not found")
+                    if response.status >= 500:
+                        return GroundTruthResult.retry(f"Server error: HTTP {response.status}")
                     if response.status != 200:
-                        return None
+                        return GroundTruthResult.fail(f"HTTP {response.status}")
                     csv_text = await response.text()
 
             reader = csv.DictReader(io.StringIO(csv_text))
             rows = list(reader)
 
             if len(rows) < 2:
-                return None
+                return GroundTruthResult.fail(f"Insufficient data for {symbol}")
 
             latest = rows[-1]
             prev = rows[-2]
@@ -289,14 +293,12 @@ The agent must:
             prev_close = self._parse_float(prev.get("Close"))
 
             if current_price is None:
-                return None
+                return GroundTruthResult.fail(f"Could not parse price for {symbol}")
 
-            # Calculate daily change
             change_percent = None
             if prev_close and prev_close != 0:
                 change_percent = ((current_price - prev_close) / prev_close) * 100
 
-            # Calculate 52-week metrics
             year_data = rows[-252:] if len(rows) >= 252 else rows
             highs = []
             lows = []
@@ -310,26 +312,28 @@ The agent must:
 
             week52_high = max(highs) if highs else None
             week52_low = min(lows) if lows else None
-
             week52_gain = None
             distance_from_high = None
 
             if week52_low and week52_low != 0:
                 week52_gain = ((current_price - week52_low) / week52_low) * 100
-
             if week52_high and week52_high != 0:
                 distance_from_high = ((current_price - week52_high) / week52_high) * 100
 
-            return {
+            return GroundTruthResult.ok({
                 "symbol": symbol,
                 "current_price": current_price,
                 "change_percent": change_percent,
                 "week52_gain": week52_gain,
                 "distance_from_high": distance_from_high,
-            }
+            })
 
-        except Exception:
-            return None
+        except aiohttp.ClientError as e:
+            return GroundTruthResult.retry(f"Network error: {e}")
+        except TimeoutError:
+            return GroundTruthResult.retry("Request timeout")
+        except Exception as e:
+            return GroundTruthResult.fail(f"Unexpected error: {e}")
 
     def _parse_float(self, value: Any) -> Optional[float]:
         if value is None:
@@ -339,11 +343,11 @@ The agent must:
         except (ValueError, TypeError):
             return None
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """
         Calculate ground truth by fetching all instruments and ranking them.
 
-        Returns the name of the instrument at the specified ranking position.
+        Returns GroundTruthResult with the name of the instrument at the specified ranking position.
         """
         instruments = validation_info.get("instruments", [])
         metric = validation_info.get("metric", "change_percent")
@@ -351,64 +355,59 @@ The agent must:
         position = validation_info.get("position", "1st")
 
         if not instruments:
-            return None
+            return GroundTruthResult.fail("No instruments provided")
 
-        # Fetch data for all instruments
         all_data = []
+        has_retryable_error = False
         for symbol, name in instruments:
-            data = await self._fetch_instrument_data(symbol)
-            if data:
+            result = await self._fetch_instrument_data(symbol)
+            if result.success:
+                data = result.value
                 data["name"] = name
                 all_data.append(data)
+            elif result.retryable:
+                has_retryable_error = True
 
         if len(all_data) < len(instruments):
-            # Need data for all instruments
-            return None
+            if has_retryable_error:
+                return GroundTruthResult.retry("Failed to fetch data for all instruments")
+            return GroundTruthResult.fail("Could not fetch data for all instruments")
 
-        # Get the metric value for sorting
         def get_metric_value(d):
             return d.get(metric)
 
-        # Filter out None values
         valid_data = [d for d in all_data if get_metric_value(d) is not None]
         if len(valid_data) < len(instruments):
-            return None
+            return GroundTruthResult.fail(f"Missing {metric} data for some instruments")
 
-        # Sort by metric
         reverse = (direction == "highest")
         sorted_data = sorted(valid_data, key=lambda d: get_metric_value(d), reverse=reverse)
 
-        # Get position index
-        position_map = {
-            "1st": 0,
-            "2nd": 1,
-            "3rd": 2,
-            "last": -1,
-            "2nd last": -2,
-        }
+        position_map = {"1st": 0, "2nd": 1, "3rd": 2, "last": -1, "2nd last": -2}
         idx = position_map.get(position, 0)
 
         try:
             result = sorted_data[idx]
-            return result["name"]
+            return GroundTruthResult.ok(result["name"])
         except IndexError:
-            return None
+            return GroundTruthResult.fail(f"Invalid position: {position}")
 
     async def validate_answer(
         self, answer: str, validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate ranking answer by checking if the correct instrument is named"""
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         answer_lower = answer.lower()
         expected_lower = ground_truth.lower()
 

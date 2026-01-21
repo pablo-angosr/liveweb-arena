@@ -12,7 +12,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
 )
 from .variables import (
     StockVariable, IndexVariable, US_STOCKS, INDICES,
@@ -155,7 +155,7 @@ class StooqHistoricalTemplate(QuestionTemplate):
 - Score 0.0: Value differs by more than 2% or answer format is wrong
 - For averages, accept values rounded to 2 decimal places"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[float]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """
         Calculate ground truth from historical CSV data.
         """
@@ -164,10 +164,9 @@ class StooqHistoricalTemplate(QuestionTemplate):
         num_days = validation_info.get("num_days", 5)
 
         if not symbol:
-            return None
+            return GroundTruthResult.fail("No symbol provided")
 
         try:
-            # Fetch CSV data
             async with aiohttp.ClientSession() as session:
                 params = {"s": symbol, "i": "d"}
                 async with session.get(
@@ -175,17 +174,20 @@ class StooqHistoricalTemplate(QuestionTemplate):
                     params=params,
                     timeout=aiohttp.ClientTimeout(total=15)
                 ) as response:
+                    if response.status == 404:
+                        return GroundTruthResult.fail(f"Symbol {symbol} not found")
+                    if response.status >= 500:
+                        return GroundTruthResult.retry(f"Server error: HTTP {response.status}")
                     if response.status != 200:
-                        return None
+                        return GroundTruthResult.fail(f"HTTP {response.status}")
                     csv_text = await response.text()
 
             reader = csv.DictReader(io.StringIO(csv_text))
             rows = list(reader)
 
             if len(rows) < num_days:
-                return None
+                return GroundTruthResult.fail(f"Insufficient data: need {num_days} days, got {len(rows)}")
 
-            # Get the last N days of data
             recent_data = rows[-num_days:]
             closes = []
             for row in recent_data:
@@ -194,22 +196,25 @@ class StooqHistoricalTemplate(QuestionTemplate):
                     closes.append(close)
 
             if not closes:
-                return None
+                return GroundTruthResult.fail("Could not parse closing prices")
 
-            # Calculate result based on query type
             if query_type == "highest_close":
-                return max(closes)
+                return GroundTruthResult.ok(max(closes))
             elif query_type == "lowest_close":
-                return min(closes)
+                return GroundTruthResult.ok(min(closes))
             elif query_type == "average_close":
-                return sum(closes) / len(closes)
+                return GroundTruthResult.ok(sum(closes) / len(closes))
             elif query_type == "price_range":
-                return max(closes) - min(closes)
+                return GroundTruthResult.ok(max(closes) - min(closes))
             else:
-                return None
+                return GroundTruthResult.fail(f"Unknown query type: {query_type}")
 
-        except Exception:
-            return None
+        except aiohttp.ClientError as e:
+            return GroundTruthResult.retry(f"Network error: {e}")
+        except TimeoutError:
+            return GroundTruthResult.retry("Request timeout")
+        except Exception as e:
+            return GroundTruthResult.fail(f"Unexpected error: {e}")
 
     def _parse_float(self, value: Any) -> Optional[float]:
         if value is None:
@@ -223,16 +228,18 @@ class StooqHistoricalTemplate(QuestionTemplate):
         self, answer: str, validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate historical data answer"""
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
+
+        ground_truth = result.value
 
         # Extract number from answer
         import re

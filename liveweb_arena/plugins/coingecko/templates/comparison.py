@@ -7,7 +7,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 from .price import CoinVariable, CoinSpec
 from ..api_client import CoinGeckoClient
@@ -97,7 +97,7 @@ class CoinGeckoComparisonTemplate(QuestionTemplate):
 - Score 0.0: Wrong coin identified or unclear answer
 - Accept formats: "{coin1}", "{coin1} is higher", "{coin1} has more", "Yes" (if question is "Is X > Y?")"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch comparison data from CoinGecko API."""
         coin1_id = validation_info.get("coin1_id", "")
         coin2_id = validation_info.get("coin2_id", "")
@@ -106,20 +106,20 @@ class CoinGeckoComparisonTemplate(QuestionTemplate):
         comp_type = validation_info.get("comparison_type", "price")
 
         if not coin1_id or not coin2_id:
-            return None
+            return GroundTruthResult.fail("Missing coin IDs")
 
         try:
             data = await CoinGeckoClient.get_coin_market_data(f"{coin1_id},{coin2_id}")
 
-            if len(data) < 2:
-                return None
+            if not data or len(data) < 2:
+                return GroundTruthResult.retry("Incomplete data from CoinGecko API")
 
             # Find each coin's data
             coin1_data = next((d for d in data if d["id"] == coin1_id), None)
             coin2_data = next((d for d in data if d["id"] == coin2_id), None)
 
             if not coin1_data or not coin2_data:
-                return None
+                return GroundTruthResult.fail("Could not find data for both coins")
 
             # Get comparison values
             if comp_type == "price":
@@ -133,12 +133,12 @@ class CoinGeckoComparisonTemplate(QuestionTemplate):
                 val2 = coin2_data.get("total_volume", 0)
 
             if val1 > val2:
-                return f"{coin1_name} (${val1:,.2f} vs ${val2:,.2f})"
+                return GroundTruthResult.ok(f"{coin1_name} (${val1:,.2f} vs ${val2:,.2f})")
             else:
-                return f"{coin2_name} (${val2:,.2f} vs ${val1:,.2f})"
+                return GroundTruthResult.ok(f"{coin2_name} (${val2:,.2f} vs ${val1:,.2f})")
 
-        except Exception:
-            return None
+        except Exception as e:
+            return GroundTruthResult.retry(f"API error: {e}")
 
     async def validate_answer(
         self,
@@ -146,17 +146,18 @@ class CoinGeckoComparisonTemplate(QuestionTemplate):
         validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate comparison answer."""
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         coin1_name = validation_info.get("coin1_name", "").lower()
         coin2_name = validation_info.get("coin2_name", "").lower()
 

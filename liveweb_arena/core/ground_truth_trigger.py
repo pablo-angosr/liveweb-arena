@@ -9,14 +9,49 @@ Design Principles:
 2. Each template defines its own trigger logic
 3. Different fetch strategies: FIRST, LAST, ALL (for range validation)
 4. Fallback: fetch at end if never triggered
+5. GroundTruthResult distinguishes success, retryable failure, and permanent failure
 """
 
 import re
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Pattern
+from typing import Any, Callable, Dict, List, Optional, Pattern, Union
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class GroundTruthResult:
+    """
+    Result of a ground truth fetch operation.
+
+    Distinguishes between:
+    - Success: value obtained
+    - Retryable failure: temporary error (network timeout, rate limit)
+    - Permanent failure: data doesn't exist or can't be parsed
+    """
+    success: bool
+    value: Optional[Any] = None
+    error: Optional[str] = None
+    retryable: bool = False
+
+    @classmethod
+    def ok(cls, value: Any) -> "GroundTruthResult":
+        """Successfully obtained ground truth value."""
+        return cls(success=True, value=value)
+
+    @classmethod
+    def retry(cls, reason: str) -> "GroundTruthResult":
+        """Retryable failure (network timeout, HTTP 5xx, rate limit)."""
+        return cls(success=False, error=reason, retryable=True)
+
+    @classmethod
+    def fail(cls, reason: str) -> "GroundTruthResult":
+        """Permanent failure (404, parse error, data doesn't exist)."""
+        return cls(success=False, error=reason, retryable=False)
 
 
 class FetchStrategy(Enum):
@@ -399,7 +434,7 @@ class GroundTruthManager:
 
         Args:
             url: The URL the agent just navigated to
-            max_retries: Maximum retry attempts for network errors
+            max_retries: Maximum retry attempts for retryable failures
 
         Returns:
             List of subtask tags that were triggered and fetched
@@ -416,25 +451,39 @@ class GroundTruthManager:
             if not state.should_fetch_again():
                 continue
 
-            # Fetch ground truth with retry for network errors
             fetch = GroundTruthFetch(url=url, value=None, timestamp=time.time())
-            last_error = None
 
             for attempt in range(max_retries):
                 try:
                     fetch_func = self._fetch_funcs[tag]
-                    fetch.value = await fetch_func()
-                    fetch.error = None  # Clear any previous error
-                    break
+                    result = await fetch_func()
+
+                    # Handle GroundTruthResult
+                    if isinstance(result, GroundTruthResult):
+                        if result.success:
+                            fetch.value = result.value
+                            fetch.error = None
+                            break
+                        elif result.retryable and attempt < max_retries - 1:
+                            logger.warning(f"GT fetch retry {attempt+1}/{max_retries} for {tag}: {result.error}")
+                            await asyncio.sleep(1.0 * (attempt + 1))
+                            continue
+                        else:
+                            fetch.error = result.error
+                            break
+                    else:
+                        # Legacy: raw value returned (backward compatibility)
+                        fetch.value = result
+                        fetch.error = None
+                        break
+
                 except Exception as e:
-                    last_error = e
-                    # Retry on network-related errors
                     error_name = type(e).__name__
                     if any(err in error_name for err in ['Timeout', 'Connect', 'Network']):
                         if attempt < max_retries - 1:
+                            logger.warning(f"GT fetch retry {attempt+1}/{max_retries} for {tag}: {e}")
                             await asyncio.sleep(1.0 * (attempt + 1))
                             continue
-                    # Non-retryable error or max retries reached
                     fetch.error = str(e)
                     break
 
@@ -451,7 +500,7 @@ class GroundTruthManager:
 
         Args:
             subtasks: Optional list of SubTask objects for legacy handling
-            max_retries: Maximum retry attempts for network errors
+            max_retries: Maximum retry attempts for retryable failures
         """
         import asyncio
         import time
@@ -466,9 +515,25 @@ class GroundTruthManager:
             for attempt in range(max_retries):
                 try:
                     fetch_func = self._fetch_funcs[tag]
-                    fetch.value = await fetch_func()
-                    fetch.error = None
-                    break
+                    result = await fetch_func()
+
+                    if isinstance(result, GroundTruthResult):
+                        if result.success:
+                            fetch.value = result.value
+                            fetch.error = None
+                            break
+                        elif result.retryable and attempt < max_retries - 1:
+                            logger.warning(f"GT fallback retry {attempt+1}/{max_retries} for {tag}: {result.error}")
+                            await asyncio.sleep(1.0 * (attempt + 1))
+                            continue
+                        else:
+                            fetch.error = result.error
+                            break
+                    else:
+                        fetch.value = result
+                        fetch.error = None
+                        break
+
                 except Exception as e:
                     error_name = type(e).__name__
                     if any(err in error_name for err in ['Timeout', 'Connect', 'Network']):
@@ -484,11 +549,9 @@ class GroundTruthManager:
         if subtasks and self._task_manager:
             for subtask in subtasks:
                 if subtask.answer_tag in self.states:
-                    continue  # Already registered
+                    continue
 
                 plugin = self._task_manager.get_plugin(subtask.plugin_name)
-
-                # Create state and fetch
                 state = GroundTruthState(
                     subtask_tag=subtask.answer_tag,
                     trigger=None,
@@ -498,9 +561,24 @@ class GroundTruthManager:
 
                 for attempt in range(max_retries):
                     try:
-                        fetch.value = await plugin.get_ground_truth(subtask.validation_info)
-                        fetch.error = None
-                        break
+                        result = await plugin.get_ground_truth(subtask.validation_info)
+
+                        if isinstance(result, GroundTruthResult):
+                            if result.success:
+                                fetch.value = result.value
+                                fetch.error = None
+                                break
+                            elif result.retryable and attempt < max_retries - 1:
+                                await asyncio.sleep(1.0 * (attempt + 1))
+                                continue
+                            else:
+                                fetch.error = result.error
+                                break
+                        else:
+                            fetch.value = result
+                            fetch.error = None
+                            break
+
                     except Exception as e:
                         error_name = type(e).__name__
                         if any(err in error_name for err in ['Timeout', 'Connect', 'Network']):

@@ -7,7 +7,7 @@ import httpx
 
 from liveweb_arena.core.validators.base import QuestionTemplate, GeneratedQuestion, ValidationResult, register_template
 from liveweb_arena.core.validators.validators import NumericToleranceValidator
-from liveweb_arena.core.ground_truth_trigger import UrlPatternTrigger, FetchStrategy, TriggerConfig
+from liveweb_arena.core.ground_truth_trigger import UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 from .variables import (
     LocationVariable, DateVariable, WeatherMetricVariable, TimeOfDayVariable,
     LocationType, MetricType, DateType,
@@ -149,7 +149,7 @@ class TimeOfDayWeatherTemplate(QuestionTemplate):
 - Score 1.0: Values match within tolerance
 - Score 0.0: Values differ significantly"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Any:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         location = validation_info["location"]
         target_date = validation_info["target_date"]  # YYYY-MM-DD format
         hourly_indices = validation_info["hourly_indices"]
@@ -158,46 +158,55 @@ class TimeOfDayWeatherTemplate(QuestionTemplate):
 
         url = f"https://wttr.in/{location}?format=j1"
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            data = response.json()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                data = response.json()
 
-        weather = data.get("weather", [])
+            weather = data.get("weather", [])
 
-        # Find day by date (timezone-safe) instead of using array index
-        day_data = None
-        for day in weather:
-            if day.get("date") == target_date:
-                day_data = day
-                break
+            # Find day by date (timezone-safe) instead of using array index
+            day_data = None
+            for day in weather:
+                if day.get("date") == target_date:
+                    day_data = day
+                    break
 
-        if day_data is None:
-            return None
+            if day_data is None:
+                return GroundTruthResult.fail(f"No data for date: {target_date}")
 
-        hourly = day_data.get("hourly", [])
+            hourly = day_data.get("hourly", [])
 
-        # Average values across the time period
-        values = []
-        for idx in hourly_indices:
-            if idx < len(hourly):
-                val = hourly[idx].get(api_field)
-                if val is not None:
-                    values.append(float(val))
+            # Average values across the time period
+            values = []
+            for idx in hourly_indices:
+                if idx < len(hourly):
+                    val = hourly[idx].get(api_field)
+                    if val is not None:
+                        values.append(float(val))
 
-        if not values:
-            return None
+            if not values:
+                return GroundTruthResult.fail(f"No hourly data for {api_field}")
 
-        avg_value = sum(values) / len(values)
-        return f"{avg_value:.0f}{unit}" if unit else f"{avg_value:.0f}"
+            avg_value = sum(values) / len(values)
+            result = f"{avg_value:.0f}{unit}" if unit else f"{avg_value:.0f}"
+            return GroundTruthResult.ok(result)
+
+        except httpx.HTTPStatusError as e:
+            return GroundTruthResult.retry(f"HTTP error: {e.response.status_code}")
+        except httpx.RequestError as e:
+            return GroundTruthResult.retry(f"Network error: {e}")
+        except Exception as e:
+            return GroundTruthResult.retry(f"API error: {e}")
 
     async def validate_answer(self, answer: str, validation_info: Dict[str, Any]) -> ValidationResult:
-        try:
-            ground_truth = await self.get_ground_truth(validation_info)
-        except Exception as e:
+        result = await self.get_ground_truth(validation_info)
+
+        if not result.success:
             return ValidationResult(
                 score=0.0, is_correct=False, expected=None, actual=answer,
-                details=f"Failed to get ground truth: {e}",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
         metric_type = validation_info["metric_type"]
@@ -206,7 +215,7 @@ class TimeOfDayWeatherTemplate(QuestionTemplate):
         if validator is None:
             validator = NumericToleranceValidator(2, 5, validation_info.get("unit", ""))
 
-        return validator.validate(answer, ground_truth)
+        return validator.validate(answer, result.value)
 
     def get_ground_truth_trigger(self, validation_info: Dict[str, Any]) -> tuple:
         """

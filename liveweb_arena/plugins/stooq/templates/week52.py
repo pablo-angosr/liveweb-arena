@@ -12,7 +12,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
 )
 from .variables import (
     US_STOCKS, INDICES, StockSpec, IndexSpec, InstrumentType,
@@ -165,11 +165,11 @@ class Stooq52WeekTemplate(QuestionTemplate):
 - Score 1.0: Correctly identifies whether closer to high or low
 - Score 0.0: Wrong answer"""
 
-    async def _fetch_52week_data(self, symbol: str) -> Optional[Dict[str, Any]]:
+    async def _fetch_52week_data(self, symbol: str) -> GroundTruthResult:
         """
         Fetch 52-week data from Stooq CSV.
 
-        Returns dict with: current_price, high_52w, low_52w
+        Returns GroundTruthResult with dict: current_price, high_52w, low_52w
         """
         try:
             async with aiohttp.ClientSession() as session:
@@ -179,15 +179,19 @@ class Stooq52WeekTemplate(QuestionTemplate):
                     params=params,
                     timeout=aiohttp.ClientTimeout(total=15)
                 ) as response:
+                    if response.status == 404:
+                        return GroundTruthResult.fail(f"Symbol {symbol} not found")
+                    if response.status >= 500:
+                        return GroundTruthResult.retry(f"Server error: HTTP {response.status}")
                     if response.status != 200:
-                        return None
+                        return GroundTruthResult.fail(f"HTTP {response.status}")
                     csv_text = await response.text()
 
             reader = csv.DictReader(io.StringIO(csv_text))
             rows = list(reader)
 
             if len(rows) < 10:
-                return None
+                return GroundTruthResult.fail(f"Insufficient data: {len(rows)} rows")
 
             # Get last 252 trading days (approximately 1 year)
             year_data = rows[-252:] if len(rows) >= 252 else rows
@@ -204,21 +208,25 @@ class Stooq52WeekTemplate(QuestionTemplate):
                     lows.append(low)
 
             if not highs or not lows:
-                return None
+                return GroundTruthResult.fail("Could not parse price data from CSV")
 
             # Current price is the last close
             current = self._parse_float(rows[-1].get("Close"))
             if current is None:
-                return None
+                return GroundTruthResult.fail("Could not parse current price")
 
-            return {
+            return GroundTruthResult.ok({
                 "current_price": current,
                 "high_52w": max(highs),
                 "low_52w": min(lows),
-            }
+            })
 
-        except Exception:
-            return None
+        except aiohttp.ClientError as e:
+            return GroundTruthResult.retry(f"Network error: {e}")
+        except TimeoutError:
+            return GroundTruthResult.retry("Request timeout")
+        except Exception as e:
+            return GroundTruthResult.fail(f"Unexpected error: {e}")
 
     def _parse_float(self, value: Any) -> Optional[float]:
         if value is None:
@@ -228,11 +236,11 @@ class Stooq52WeekTemplate(QuestionTemplate):
         except (ValueError, TypeError):
             return None
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """
         Calculate ground truth based on query type.
 
-        Returns:
+        Returns GroundTruthResult with:
             - For high/low: price as string (e.g., "255.53")
             - For distance: percentage as string (e.g., "-5.23%" or "+12.45%")
             - For closer_to: "high" or "low"
@@ -241,38 +249,37 @@ class Stooq52WeekTemplate(QuestionTemplate):
         query_type = validation_info.get("query_type", "high_price")
 
         if not symbol:
-            return None
+            return GroundTruthResult.fail("No symbol provided")
 
-        data = await self._fetch_52week_data(symbol)
-        if data is None:
-            return None
+        result = await self._fetch_52week_data(symbol)
+        if not result.success:
+            return result
 
+        data = result.value
         current = data["current_price"]
         high = data["high_52w"]
         low = data["low_52w"]
 
         if query_type == "high_price":
-            return f"{high:.2f}"
+            return GroundTruthResult.ok(f"{high:.2f}")
 
         elif query_type == "low_price":
-            return f"{low:.2f}"
+            return GroundTruthResult.ok(f"{low:.2f}")
 
         elif query_type == "distance_from_high":
-            # Percentage below high (usually negative or zero)
             pct = ((current - high) / high) * 100
-            return f"{pct:.2f}%"
+            return GroundTruthResult.ok(f"{pct:.2f}%")
 
         elif query_type == "distance_from_low":
-            # Percentage above low (usually positive)
             pct = ((current - low) / low) * 100
-            return f"{pct:.2f}%"
+            return GroundTruthResult.ok(f"{pct:.2f}%")
 
         elif query_type == "closer_to":
             dist_to_high = abs(current - high)
             dist_to_low = abs(current - low)
-            return "high" if dist_to_high < dist_to_low else "low"
+            return GroundTruthResult.ok("high" if dist_to_high < dist_to_low else "low")
 
-        return None
+        return GroundTruthResult.fail(f"Unknown query type: {query_type}")
 
     async def validate_answer(
         self, answer: str, validation_info: Dict[str, Any]
@@ -280,17 +287,19 @@ class Stooq52WeekTemplate(QuestionTemplate):
         """Validate 52-week answer"""
         import re
 
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
         query_type = validation_info.get("query_type", "high_price")
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
+
+        ground_truth = result.value
 
         # Handle closer_to type (string match)
         if query_type == "closer_to":

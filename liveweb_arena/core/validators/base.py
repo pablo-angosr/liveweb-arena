@@ -3,11 +3,11 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Callable, Type, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Callable, Type, TYPE_CHECKING, Union
 import random
 
 if TYPE_CHECKING:
-    from ..ground_truth_trigger import GroundTruthTrigger, FetchStrategy
+    from ..ground_truth_trigger import GroundTruthTrigger, FetchStrategy, GroundTruthResult
 
 
 # Global template registry
@@ -203,7 +203,9 @@ class QuestionTemplate(ABC):
         pass
 
     @abstractmethod
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Any:
+    async def get_ground_truth(
+        self, validation_info: Dict[str, Any]
+    ) -> Union["GroundTruthResult", Any]:
         """
         Fetch ground truth from real-time API.
 
@@ -211,7 +213,7 @@ class QuestionTemplate(ABC):
             validation_info: Information needed to query the API
 
         Returns:
-            Ground truth value
+            GroundTruthResult with success/failure status, or raw value (legacy)
         """
         pass
 

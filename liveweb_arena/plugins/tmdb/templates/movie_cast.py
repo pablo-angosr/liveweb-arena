@@ -7,7 +7,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 from .variables import MovieVariable, CastPositionVariable, MovieSpec
 from ..api_client import TMDBClient
@@ -119,34 +119,36 @@ class TMDBMovieCastTemplate(QuestionTemplate):
 - Score 0.0: None of the top 5 mentioned
 - Order doesn't matter, names must match"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch movie credits from TMDB API."""
         movie_id = validation_info.get("movie_id", "")
         position = validation_info.get("cast_position", "lead")
 
         if not movie_id:
-            return None
+            return GroundTruthResult.fail("No movie_id provided")
 
         try:
             data = await TMDBClient.get_movie_credits(movie_id)
             if not data:
-                return None
+                return GroundTruthResult.retry("No data returned from TMDB API")
 
             cast = data.get("cast", [])
             if not cast:
-                return None
+                return GroundTruthResult.fail("No cast data available")
 
             if position == "lead":
-                return cast[0]["name"] if cast else None
+                if cast:
+                    return GroundTruthResult.ok(cast[0]["name"])
+                return GroundTruthResult.fail("No lead actor found")
             elif position == "top_3":
                 names = [c["name"] for c in cast[:3]]
-                return ", ".join(names)
+                return GroundTruthResult.ok(", ".join(names))
             else:  # top_5
                 names = [c["name"] for c in cast[:5]]
-                return ", ".join(names)
+                return GroundTruthResult.ok(", ".join(names))
 
-        except Exception:
-            return None
+        except Exception as e:
+            return GroundTruthResult.retry(f"TMDB API error: {e}")
 
     async def validate_answer(
         self,
@@ -154,17 +156,18 @@ class TMDBMovieCastTemplate(QuestionTemplate):
         validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate movie cast answer."""
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         position = validation_info.get("cast_position", "lead")
 
         if position == "lead":

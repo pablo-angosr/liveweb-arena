@@ -11,7 +11,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
 )
 from .variables import CURRENCIES, CurrencySpec
 
@@ -134,7 +134,7 @@ The agent must:
 2. Calculate the conversion correctly
 3. Provide a clear numeric answer"""
 
-    async def _fetch_exchange_rate(self, symbol: str) -> Optional[float]:
+    async def _fetch_exchange_rate(self, symbol: str) -> GroundTruthResult:
         """Fetch current exchange rate from Stooq CSV"""
         try:
             async with aiohttp.ClientSession() as session:
@@ -144,30 +144,38 @@ The agent must:
                     params=params,
                     timeout=aiohttp.ClientTimeout(total=15)
                 ) as response:
+                    if response.status == 404:
+                        return GroundTruthResult.fail(f"Currency pair {symbol} not found")
+                    if response.status >= 500:
+                        return GroundTruthResult.retry(f"Server error: HTTP {response.status}")
                     if response.status != 200:
-                        return None
+                        return GroundTruthResult.fail(f"HTTP {response.status}")
                     csv_text = await response.text()
 
             reader = csv.DictReader(io.StringIO(csv_text))
             rows = list(reader)
 
             if not rows:
-                return None
+                return GroundTruthResult.fail(f"No data for {symbol}")
 
-            # Get latest close price (exchange rate)
             latest = rows[-1]
             rate = float(latest.get("Close", 0))
-            return rate if rate > 0 else None
+            if rate <= 0:
+                return GroundTruthResult.fail("Invalid exchange rate")
+            return GroundTruthResult.ok(rate)
 
-        except Exception:
-            return None
+        except aiohttp.ClientError as e:
+            return GroundTruthResult.retry(f"Network error: {e}")
+        except TimeoutError:
+            return GroundTruthResult.retry("Request timeout")
+        except Exception as e:
+            return GroundTruthResult.fail(f"Unexpected error: {e}")
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """
         Calculate converted amount based on exchange rate.
 
-        Returns:
-            Converted amount as formatted string (e.g., "1159.94 USD")
+        Returns GroundTruthResult with converted amount as string (e.g., "1159.94 USD")
         """
         symbol = validation_info.get("symbol", "")
         amount = validation_info.get("amount", 0)
@@ -175,22 +183,19 @@ The agent must:
         base = validation_info.get("base", "")
         quote = validation_info.get("quote", "")
 
-        rate = await self._fetch_exchange_rate(symbol)
-        if rate is None:
-            return None
+        result = await self._fetch_exchange_rate(symbol)
+        if not result.success:
+            return result
 
-        # Calculate conversion
-        # Exchange rate format: EUR/USD = 1.16 means 1 EUR = 1.16 USD
+        rate = result.value
         if direction == "base_to_quote":
-            # Converting base to quote: amount * rate
-            result = amount * rate
+            converted = amount * rate
             result_currency = quote
         else:
-            # Converting quote to base: amount / rate
-            result = amount / rate
+            converted = amount / rate
             result_currency = base
 
-        return f"{result:.2f} {result_currency}"
+        return GroundTruthResult.ok(f"{converted:.2f} {result_currency}")
 
     async def validate_answer(
         self, answer: str, validation_info: Dict[str, Any]
@@ -198,16 +203,18 @@ The agent must:
         """Validate currency conversion answer"""
         import re
 
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
+
+        ground_truth = result.value
 
         # Parse expected value
         expected_match = re.match(r'([\d.]+)\s*(\w+)', ground_truth)

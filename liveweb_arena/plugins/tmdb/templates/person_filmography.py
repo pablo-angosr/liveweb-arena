@@ -7,7 +7,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 from ..api_client import TMDBClient
 
@@ -183,7 +183,7 @@ class TMDBPersonFilmographyTemplate(QuestionTemplate):
             variables={"person": person, "query_type": query_type},
             validation_info=validation_info,
             template_name=self.name,
-            expected_steps=20,  # Multi-step task needs more steps
+            expected_steps=12,  # Search + navigate to person page + find filmography
         )
 
     def _build_question(
@@ -233,20 +233,20 @@ class TMDBPersonFilmographyTemplate(QuestionTemplate):
 - Score 0.0: Wrong movie or old movie
 - Only count released movies, not upcoming ones"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch person filmography from TMDB API."""
         person_id = validation_info.get("person_id", "")
         query_type = validation_info.get("query_type", FilmographyQueryType.MOVIE_COUNT)
         is_director = validation_info.get("is_director", False)
 
         if not person_id:
-            return None
+            return GroundTruthResult.fail("No person_id provided")
 
         try:
             # Get person's movie credits
             data = await TMDBClient.get(f"/person/{person_id}/movie_credits")
             if not data:
-                return None
+                return GroundTruthResult.retry("No data returned from TMDB API")
 
             if is_director:
                 # Filter crew for directing jobs
@@ -263,7 +263,7 @@ class TMDBPersonFilmographyTemplate(QuestionTemplate):
                 ]
 
             if not movies:
-                return None
+                return GroundTruthResult.fail("No movies found for this person")
 
             # Sort by release date
             movies_sorted = sorted(
@@ -278,23 +278,23 @@ class TMDBPersonFilmographyTemplate(QuestionTemplate):
             if query_type == FilmographyQueryType.MOVIE_COUNT:
                 # Count unique movies (some may have multiple credits)
                 unique_ids = set(m.get("id") for m in movies)
-                return str(len(unique_ids))
+                return GroundTruthResult.ok(str(len(unique_ids)))
 
             elif query_type == FilmographyQueryType.FIRST_MOVIE:
                 # Get first movie by release date
                 first = movies_sorted[0]
-                return f"{first.get('title')} ({first.get('release_date', '')[:4]})"
+                return GroundTruthResult.ok(f"{first.get('title')} ({first.get('release_date', '')[:4]})")
 
             else:  # LATEST_MOVIE
                 # Get latest released movie (not future)
                 released = [m for m in movies_sorted if m.get("release_date", "") <= today]
                 if released:
                     latest = released[-1]
-                    return f"{latest.get('title')} ({latest.get('release_date', '')[:4]})"
-                return None
+                    return GroundTruthResult.ok(f"{latest.get('title')} ({latest.get('release_date', '')[:4]})")
+                return GroundTruthResult.fail("No released movies found")
 
-        except Exception:
-            return None
+        except Exception as e:
+            return GroundTruthResult.retry(f"TMDB API error: {e}")
 
     async def validate_answer(
         self,
@@ -302,17 +302,18 @@ class TMDBPersonFilmographyTemplate(QuestionTemplate):
         validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate filmography answer."""
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         query_type = validation_info.get("query_type", FilmographyQueryType.MOVIE_COUNT)
 
         if query_type == FilmographyQueryType.MOVIE_COUNT:

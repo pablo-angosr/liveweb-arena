@@ -8,7 +8,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 
 
@@ -96,7 +96,7 @@ class NetworkTemplate(QuestionTemplate):
 
         return ""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[Any]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch ground truth from Bittensor SDK"""
         try:
             import bittensor as bt
@@ -105,18 +105,17 @@ class NetworkTemplate(QuestionTemplate):
             metric = validation_info.get("metric", "")
 
             if metric == "subnet_count":
-                # Get all subnet netuids
                 netuids = subtensor.get_all_subnets_netuid()
-                return len(netuids)
+                return GroundTruthResult.ok(len(netuids))
 
             elif metric == "current_block":
                 block = subtensor.get_current_block()
-                return block
+                return GroundTruthResult.ok(block)
 
-            return None
+            return GroundTruthResult.fail(f"Unknown metric: {metric}")
 
-        except Exception:
-            return None
+        except Exception as e:
+            return GroundTruthResult.retry(f"Bittensor SDK error: {e}")
 
     async def validate_answer(
         self, answer: str, validation_info: Dict[str, Any]
@@ -124,18 +123,19 @@ class NetworkTemplate(QuestionTemplate):
         """Validate answer against ground truth"""
         import re
 
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
         metric = validation_info.get("metric", "")
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         # Extract number from answer
         numbers = re.findall(r'[\d,]+', answer.replace(',', ''))
         if not numbers:

@@ -8,7 +8,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 from .variables import _fetch_active_subnet_ids, _fetch_subnet_name
 
@@ -141,12 +141,12 @@ class AnalysisTemplate(QuestionTemplate):
 - Score 1.0: Agent correctly identifies the subnet with {rule}
 - Score 0.0: Wrong subnet or no clear answer"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """
         Calculate ground truth by fetching subnet data and computing derived metrics.
 
         Returns:
-            Name of the winning subnet (simple string for clear LLM validation)
+            GroundTruthResult with the name of the winning subnet
         """
         try:
             import bittensor as bt
@@ -157,7 +157,7 @@ class AnalysisTemplate(QuestionTemplate):
             subnet_names = validation_info.get("subnet_names", [])
 
             if not subnet_ids or len(subnet_ids) != len(subnet_names):
-                return None
+                return GroundTruthResult.fail("Invalid subnet IDs or names")
 
             # Fetch data for each subnet
             subnet_data = []
@@ -169,8 +169,6 @@ class AnalysisTemplate(QuestionTemplate):
 
                     price = float(info.price.tao) if info.price else 0
                     tao_in = float(info.tao_in.tao) if info.tao_in else 0
-
-                    # Calculate derived metrics
                     price_to_stake = price / tao_in if tao_in > 0 else 0
 
                     subnet_data.append({
@@ -184,7 +182,7 @@ class AnalysisTemplate(QuestionTemplate):
                     continue
 
             if len(subnet_data) < 2:
-                return None
+                return GroundTruthResult.retry("Could not fetch enough subnet data")
 
             # Sort by the relevant metric
             sort_config = {
@@ -196,31 +194,32 @@ class AnalysisTemplate(QuestionTemplate):
             }
 
             if analysis_type not in sort_config:
-                return None
+                return GroundTruthResult.fail(f"Unknown analysis type: {analysis_type}")
 
             sort_key, reverse = sort_config[analysis_type]
             subnet_data.sort(key=lambda x: x[sort_key], reverse=reverse)
 
-            return subnet_data[0]["name"]
+            return GroundTruthResult.ok(subnet_data[0]["name"])
 
-        except Exception:
-            return None
+        except Exception as e:
+            return GroundTruthResult.retry(f"Bittensor SDK error: {e}")
 
     async def validate_answer(
         self, answer: str, validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate analysis answer"""
-        top_name = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if top_name is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        top_name = result.value
         answer_lower = answer.lower()
 
         # Binary scoring: correct subnet or wrong

@@ -12,7 +12,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 from .variables import (
     LocationVariable, DateVariable,
@@ -191,7 +191,7 @@ class AstronomyTemplate(QuestionTemplate):
 - Valid phases: New Moon, Waxing Crescent, First Quarter, Waxing Gibbous,
   Full Moon, Waning Gibbous, Last Quarter, Waning Crescent"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Any:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch astronomy data from wttr.in API"""
         location = validation_info["location"]
         target_date = validation_info["target_date"]
@@ -199,31 +199,42 @@ class AstronomyTemplate(QuestionTemplate):
 
         url = f"https://wttr.in/{location}?format=j1"
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            data = response.json()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                data = response.json()
 
-        weather = data.get("weather", [])
+            weather = data.get("weather", [])
 
-        # Find day by date
-        day_data = None
-        for day in weather:
-            if day.get("date") == target_date:
-                day_data = day
-                break
+            # Find day by date
+            day_data = None
+            for day in weather:
+                if day.get("date") == target_date:
+                    day_data = day
+                    break
 
-        if day_data is None:
-            return None
+            if day_data is None:
+                return GroundTruthResult.fail(f"No data for date: {target_date}")
 
-        astronomy = day_data.get("astronomy", [])
-        if not astronomy:
-            return None
+            astronomy = day_data.get("astronomy", [])
+            if not astronomy:
+                return GroundTruthResult.fail("No astronomy data available")
 
-        astro_data = astronomy[0]
-        value = astro_data.get(api_field)
+            astro_data = astronomy[0]
+            value = astro_data.get(api_field)
 
-        return value
+            if value is None:
+                return GroundTruthResult.fail(f"Missing {api_field} data")
+
+            return GroundTruthResult.ok(value)
+
+        except httpx.HTTPStatusError as e:
+            return GroundTruthResult.retry(f"HTTP error: {e.response.status_code}")
+        except httpx.RequestError as e:
+            return GroundTruthResult.retry(f"Network error: {e}")
+        except Exception as e:
+            return GroundTruthResult.retry(f"API error: {e}")
 
     async def validate_answer(
         self,
@@ -231,26 +242,18 @@ class AstronomyTemplate(QuestionTemplate):
         validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate astronomy answer"""
-        try:
-            ground_truth = await self.get_ground_truth(validation_info)
-        except Exception as e:
+        result = await self.get_ground_truth(validation_info)
+
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details=f"Failed to get ground truth: {e}",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
-        if ground_truth is None:
-            return ValidationResult(
-                score=0.0,
-                is_correct=False,
-                expected=None,
-                actual=answer,
-                details="Ground truth unavailable",
-            )
-
+        ground_truth = result.value
         is_time = validation_info.get("is_time", True)
 
         if is_time:

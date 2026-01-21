@@ -5,6 +5,7 @@ from .volume import CoinGeckoVolumeTemplate
 from .comparison import CoinGeckoComparisonTemplate
 from .rank import CoinGeckoRankTemplate
 from .top_movers import CoinGeckoTopMoversTemplate
+from .supply import CoinGeckoSupplyTemplate
 
 __all__ = [
     "CoinGeckoPriceTemplate",
@@ -12,4 +13,5 @@ __all__ = [
     "CoinGeckoComparisonTemplate",
     "CoinGeckoRankTemplate",
     "CoinGeckoTopMoversTemplate",
+    "CoinGeckoSupplyTemplate",
 ]

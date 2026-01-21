@@ -12,7 +12,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
 )
 
 
@@ -272,7 +272,7 @@ Scoring (total 1.0):
 
 The agent MUST report individual percentage changes for verification."""
 
-    async def _fetch_daily_change(self, symbol: str) -> Optional[float]:
+    async def _fetch_daily_change(self, symbol: str) -> GroundTruthResult:
         """Fetch daily percentage change for an instrument"""
         try:
             async with aiohttp.ClientSession() as session:
@@ -282,15 +282,19 @@ The agent MUST report individual percentage changes for verification."""
                     params=params,
                     timeout=aiohttp.ClientTimeout(total=15)
                 ) as response:
+                    if response.status == 404:
+                        return GroundTruthResult.fail(f"Symbol {symbol} not found")
+                    if response.status >= 500:
+                        return GroundTruthResult.retry(f"Server error: HTTP {response.status}")
                     if response.status != 200:
-                        return None
+                        return GroundTruthResult.fail(f"HTTP {response.status}")
                     csv_text = await response.text()
 
             reader = csv.DictReader(io.StringIO(csv_text))
             rows = list(reader)
 
             if len(rows) < 2:
-                return None
+                return GroundTruthResult.fail(f"Insufficient data for {symbol}")
 
             latest = rows[-1]
             prev = rows[-2]
@@ -299,12 +303,16 @@ The agent MUST report individual percentage changes for verification."""
             prev_close = self._parse_float(prev.get("Close"))
 
             if current_close is None or prev_close is None or prev_close == 0:
-                return None
+                return GroundTruthResult.fail(f"Could not parse price data for {symbol}")
 
-            return ((current_close - prev_close) / prev_close) * 100
+            return GroundTruthResult.ok(((current_close - prev_close) / prev_close) * 100)
 
-        except Exception:
-            return None
+        except aiohttp.ClientError as e:
+            return GroundTruthResult.retry(f"Network error: {e}")
+        except TimeoutError:
+            return GroundTruthResult.retry("Request timeout")
+        except Exception as e:
+            return GroundTruthResult.fail(f"Unexpected error: {e}")
 
     def _parse_float(self, value: Any) -> Optional[float]:
         if value is None:
@@ -316,7 +324,7 @@ The agent MUST report individual percentage changes for verification."""
 
     async def _fetch_all_ground_truth(
         self, validation_info: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    ) -> GroundTruthResult:
         """Fetch ground truth for all instruments"""
         group1 = validation_info.get("group1_instruments", [])
         group2 = validation_info.get("group2_instruments", [])
@@ -329,29 +337,31 @@ The agent MUST report individual percentage changes for verification."""
             "winner": None,
         }
 
-        # Fetch group 1
+        has_retryable_error = False
+
         g1_values = []
         for symbol, name in group1:
-            value = await self._fetch_daily_change(symbol)
-            if value is not None:
-                result["group1_data"][name] = value
-                g1_values.append(value)
+            fetch_result = await self._fetch_daily_change(symbol)
+            if fetch_result.success:
+                result["group1_data"][name] = fetch_result.value
+                g1_values.append(fetch_result.value)
+            elif fetch_result.retryable:
+                has_retryable_error = True
 
-        # Fetch group 2
         g2_values = []
         for symbol, name in group2:
-            value = await self._fetch_daily_change(symbol)
-            if value is not None:
-                result["group2_data"][name] = value
-                g2_values.append(value)
+            fetch_result = await self._fetch_daily_change(symbol)
+            if fetch_result.success:
+                result["group2_data"][name] = fetch_result.value
+                g2_values.append(fetch_result.value)
+            elif fetch_result.retryable:
+                has_retryable_error = True
 
-        # Calculate averages
         if g1_values:
             result["group1_avg"] = sum(g1_values) / len(g1_values)
         if g2_values:
             result["group2_avg"] = sum(g2_values) / len(g2_values)
 
-        # Determine winner
         if result["group1_avg"] is not None and result["group2_avg"] is not None:
             if result["group1_avg"] > result["group2_avg"]:
                 result["winner"] = "A"
@@ -360,20 +370,25 @@ The agent MUST report individual percentage changes for verification."""
             else:
                 result["winner"] = "tie"
 
-        return result
+        if result["winner"] is None:
+            if has_retryable_error:
+                return GroundTruthResult.retry("Failed to fetch enough data for comparison")
+            return GroundTruthResult.fail("Could not determine winner - insufficient data")
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+        return GroundTruthResult.ok(result)
+
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Get ground truth summary string"""
-        data = await self._fetch_all_ground_truth(validation_info)
+        result = await self._fetch_all_ground_truth(validation_info)
 
-        if data["winner"] is None:
-            return None
+        if not result.success:
+            return result
 
-        # Build detailed ground truth string
+        data = result.value
         g1_str = ", ".join(f"{k}: {v:+.2f}%" for k, v in data["group1_data"].items())
         g2_str = ", ".join(f"{k}: {v:+.2f}%" for k, v in data["group2_data"].items())
 
-        return (
+        return GroundTruthResult.ok(
             f"Group A ({data['group1_avg']:+.2f}%): {g1_str} | "
             f"Group B ({data['group2_avg']:+.2f}%): {g2_str} | "
             f"Winner: Group {data['winner']}"
@@ -408,17 +423,20 @@ The agent MUST report individual percentage changes for verification."""
         self, answer: str, validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate with intermediate data verification"""
-        ground_truth_data = await self._fetch_all_ground_truth(validation_info)
-        ground_truth_str = await self.get_ground_truth(validation_info)
+        gt_result = await self._fetch_all_ground_truth(validation_info)
+        gt_str_result = await self.get_ground_truth(validation_info)
 
-        if ground_truth_data["winner"] is None:
+        if not gt_result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {gt_result.error}",
             )
+
+        ground_truth_data = gt_result.value
+        ground_truth_str = gt_str_result.value if gt_str_result.success else None
 
         names1 = validation_info.get("group1_names", [])
         names2 = validation_info.get("group2_names", [])

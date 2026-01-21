@@ -7,7 +7,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 from liveweb_arena.plugins.coingecko.api_client import CoinGeckoClient
 
@@ -62,15 +62,17 @@ class PriceTemplate(QuestionTemplate):
 - Score 1.0: Agent provides price within 5% of actual
 - Score 0.0: No price, wrong currency, or more than 5% off"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[float]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch TAO price from CoinGecko API"""
         try:
             data = await CoinGeckoClient.get_simple_price("bittensor", "usd")
             if data:
-                return data.get("bittensor", {}).get("usd")
-            return None
-        except Exception:
-            return None
+                price = data.get("bittensor", {}).get("usd")
+                if price is not None:
+                    return GroundTruthResult.ok(price)
+            return GroundTruthResult.retry("No price data from CoinGecko")
+        except Exception as e:
+            return GroundTruthResult.retry(f"API error: {e}")
 
     async def validate_answer(
         self, answer: str, validation_info: Dict[str, Any]
@@ -78,17 +80,18 @@ class PriceTemplate(QuestionTemplate):
         """Validate price answer"""
         import re
 
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         # Extract price from answer (handle formats like $450, 450.50, etc.)
         # Remove commas and find decimal numbers
         clean_answer = answer.replace(',', '')

@@ -11,7 +11,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
 )
 from .variables import (
     StockVariable, IndexVariable, US_STOCKS, INDICES,
@@ -157,7 +157,7 @@ class StooqComparisonTemplate(QuestionTemplate):
 - Score 0.0: Wrong instrument or no clear answer provided
 - The answer must clearly state which instrument wins the comparison"""
 
-    async def _fetch_instrument_data(self, symbol: str) -> Optional[Dict[str, Any]]:
+    async def _fetch_instrument_data(self, symbol: str) -> GroundTruthResult:
         """Fetch data for a single instrument"""
         try:
             async with aiohttp.ClientSession() as session:
@@ -167,15 +167,19 @@ class StooqComparisonTemplate(QuestionTemplate):
                     params=params,
                     timeout=aiohttp.ClientTimeout(total=15)
                 ) as response:
+                    if response.status == 404:
+                        return GroundTruthResult.fail(f"Symbol {symbol} not found")
+                    if response.status >= 500:
+                        return GroundTruthResult.retry(f"Server error: HTTP {response.status}")
                     if response.status != 200:
-                        return None
+                        return GroundTruthResult.fail(f"HTTP {response.status}")
                     csv_text = await response.text()
 
             reader = csv.DictReader(io.StringIO(csv_text))
             rows = list(reader)
 
             if not rows:
-                return None
+                return GroundTruthResult.fail(f"No data for {symbol}")
 
             latest = rows[-1]
             result = {
@@ -184,17 +188,20 @@ class StooqComparisonTemplate(QuestionTemplate):
                 "volume": self._parse_float(latest.get("Volume")),
             }
 
-            # Calculate change percent if we have previous data
             if len(rows) >= 2:
                 prev = rows[-2]
                 prev_close = self._parse_float(prev.get("Close"))
                 if prev_close and result["close"]:
                     result["change_percent"] = ((result["close"] - prev_close) / prev_close) * 100
 
-            return result
+            return GroundTruthResult.ok(result)
 
-        except Exception:
-            return None
+        except aiohttp.ClientError as e:
+            return GroundTruthResult.retry(f"Network error: {e}")
+        except TimeoutError:
+            return GroundTruthResult.retry("Request timeout")
+        except Exception as e:
+            return GroundTruthResult.fail(f"Unexpected error: {e}")
 
     def _parse_float(self, value: Any) -> Optional[float]:
         if value is None:
@@ -204,30 +211,35 @@ class StooqComparisonTemplate(QuestionTemplate):
         except (ValueError, TypeError):
             return None
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """
         Fetch data for all instruments and determine the winner.
 
-        Returns:
-            Winner name as string for LLM validation display.
+        Returns GroundTruthResult with winner name as string.
         """
         symbols = validation_info.get("symbols", [])
         names = validation_info.get("names", [])
         comparison_type = validation_info.get("comparison_type", "higher_price")
 
         if not symbols or len(symbols) != len(names):
-            return None
+            return GroundTruthResult.fail("Invalid symbols/names configuration")
 
         # Fetch data for all instruments
         all_data = {}
+        has_retryable_error = False
         for symbol, name in zip(symbols, names):
-            data = await self._fetch_instrument_data(symbol)
-            if data:
+            result = await self._fetch_instrument_data(symbol)
+            if result.success:
+                data = result.value
                 data["name"] = name
                 all_data[name] = data
+            elif result.retryable:
+                has_retryable_error = True
 
         if len(all_data) < 2:
-            return None
+            if has_retryable_error:
+                return GroundTruthResult.retry("Failed to fetch enough instrument data")
+            return GroundTruthResult.fail("Could not fetch data for at least 2 instruments")
 
         # Determine winner based on comparison type
         if comparison_type == "higher_price":
@@ -241,24 +253,26 @@ class StooqComparisonTemplate(QuestionTemplate):
         elif comparison_type == "higher_volume":
             winner = max(all_data.values(), key=lambda x: x.get("volume", 0) or 0)
         else:
-            return None
+            return GroundTruthResult.fail(f"Unknown comparison type: {comparison_type}")
 
-        return winner["name"]
+        return GroundTruthResult.ok(winner["name"])
 
     async def validate_answer(
         self, answer: str, validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate comparison answer"""
-        winner_name = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if winner_name is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
+
+        winner_name = result.value
 
         answer_lower = answer.lower()
         names = validation_info.get("names", [])

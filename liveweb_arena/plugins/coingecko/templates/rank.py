@@ -7,7 +7,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 from .price import CoinVariable, CoinSpec
 from ..api_client import CoinGeckoClient
@@ -69,24 +69,24 @@ class CoinGeckoRankTemplate(QuestionTemplate):
 - Accept formats: "#5", "5", "5th", "rank 5", "ranked #5", "position 5"
 - Note: Lower rank number = higher market cap (rank 1 is highest)"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch market rank from CoinGecko API."""
         coin_id = validation_info.get("coin_id", "")
         if not coin_id:
-            return None
+            return GroundTruthResult.fail("No coin_id provided")
 
         try:
             data = await CoinGeckoClient.get_coin_market_data(coin_id)
             if not data:
-                return None
+                return GroundTruthResult.retry("No data returned from CoinGecko API")
 
             rank = data[0].get("market_cap_rank")
             if rank is not None:
-                return f"#{rank}"
+                return GroundTruthResult.ok(f"#{rank}")
 
-            return None
-        except Exception:
-            return None
+            return GroundTruthResult.fail("Missing market cap rank data")
+        except Exception as e:
+            return GroundTruthResult.retry(f"API error: {e}")
 
     async def validate_answer(
         self,
@@ -96,17 +96,18 @@ class CoinGeckoRankTemplate(QuestionTemplate):
         """Validate rank answer."""
         import re
 
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         # Parse expected rank
         expected_match = re.search(r'(\d+)', ground_truth)
         if not expected_match:

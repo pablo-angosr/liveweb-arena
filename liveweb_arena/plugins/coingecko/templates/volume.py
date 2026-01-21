@@ -7,7 +7,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 from .price import CoinVariable, CoinSpec
 from ..api_client import CoinGeckoClient
@@ -67,29 +67,29 @@ class CoinGeckoVolumeTemplate(QuestionTemplate):
 - Score 0.0: Values differ by more than 20%
 - Accept formats: $1.2B, $1.2 billion, 1200000000, 1.2B USD"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch 24h volume from CoinGecko API."""
         coin_id = validation_info.get("coin_id", "")
         if not coin_id:
-            return None
+            return GroundTruthResult.fail("No coin_id provided")
 
         try:
             data = await CoinGeckoClient.get_coin_market_data(coin_id)
             if not data:
-                return None
+                return GroundTruthResult.retry("No data returned from CoinGecko API")
 
             volume = data[0].get("total_volume")
             if volume is not None:
                 if volume >= 1e9:
-                    return f"${volume/1e9:.2f} billion"
+                    return GroundTruthResult.ok(f"${volume/1e9:.2f} billion")
                 elif volume >= 1e6:
-                    return f"${volume/1e6:.2f} million"
+                    return GroundTruthResult.ok(f"${volume/1e6:.2f} million")
                 else:
-                    return f"${volume:,.0f}"
+                    return GroundTruthResult.ok(f"${volume:,.0f}")
 
-            return None
-        except Exception:
-            return None
+            return GroundTruthResult.fail("Missing volume data")
+        except Exception as e:
+            return GroundTruthResult.retry(f"API error: {e}")
 
     async def validate_answer(
         self,
@@ -97,17 +97,18 @@ class CoinGeckoVolumeTemplate(QuestionTemplate):
         validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate trading volume answer."""
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         expected_val = self._parse_volume(ground_truth)
         actual_val = self._parse_volume(answer)
 

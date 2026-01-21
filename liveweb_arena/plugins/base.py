@@ -2,10 +2,13 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, List
+from typing import Any, List, TYPE_CHECKING, Union
 
 # Import ValidationResult from validators to avoid duplication
 from ..core.validators.base import ValidationResult
+
+if TYPE_CHECKING:
+    from ..core.ground_truth_trigger import GroundTruthResult
 
 
 @dataclass
@@ -102,7 +105,9 @@ class BasePlugin(ABC):
         pass
 
     @abstractmethod
-    async def get_ground_truth(self, validation_info: dict) -> Any:
+    async def get_ground_truth(
+        self, validation_info: dict
+    ) -> Union["GroundTruthResult", Any]:
         """
         Get ground truth value for LLM-based validation.
 
@@ -110,7 +115,7 @@ class BasePlugin(ABC):
             validation_info: Parameters for fetching ground truth (from SubTask)
 
         Returns:
-            Ground truth value (type depends on question type)
+            GroundTruthResult with success/failure status, or raw value (legacy)
         """
         pass
 

@@ -7,7 +7,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 from ..api_client import CoinGeckoClient
 
@@ -97,7 +97,7 @@ class CoinGeckoTopMoversTemplate(QuestionTemplate):
 - Accept formats: "Bitcoin (-15.2%)", "BTC lost 15%", "Bitcoin is down 15.2%"
 - Note: Top losers change frequently, validation uses real-time data"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch top gainer/loser from CoinGecko API."""
         query_type = validation_info.get("query_type", "gainer")
 
@@ -116,7 +116,7 @@ class CoinGeckoTopMoversTemplate(QuestionTemplate):
             )
 
             if not data:
-                return None
+                return GroundTruthResult.retry("No data returned from CoinGecko API")
 
             # Filter out coins with None change
             valid_coins = [
@@ -125,7 +125,7 @@ class CoinGeckoTopMoversTemplate(QuestionTemplate):
             ]
 
             if not valid_coins:
-                return None
+                return GroundTruthResult.fail("No valid coins with 24h change data")
 
             # Sort by 24h change
             if query_type == "gainer":
@@ -146,12 +146,12 @@ class CoinGeckoTopMoversTemplate(QuestionTemplate):
             change = top_coin.get("price_change_percentage_24h", 0)
 
             if query_type == "gainer":
-                return f"{name} (+{change:.2f}%)"
+                return GroundTruthResult.ok(f"{name} (+{change:.2f}%)")
             else:
-                return f"{name} ({change:.2f}%)"
+                return GroundTruthResult.ok(f"{name} ({change:.2f}%)")
 
-        except Exception:
-            return None
+        except Exception as e:
+            return GroundTruthResult.retry(f"API error: {e}")
 
     async def validate_answer(
         self,
@@ -161,17 +161,18 @@ class CoinGeckoTopMoversTemplate(QuestionTemplate):
         """Validate top mover answer."""
         import re
 
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         # Parse expected: "CoinName (+/-XX.XX%)"
         exp_match = re.match(r'(.+?)\s*\(([+-]?\d+\.?\d*)%\)', ground_truth)
         if not exp_match:

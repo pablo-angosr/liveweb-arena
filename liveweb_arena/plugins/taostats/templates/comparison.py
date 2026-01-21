@@ -8,7 +8,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 from .variables import _fetch_active_subnet_ids, _fetch_subnet_name
 
@@ -121,11 +121,11 @@ class ComparisonTemplate(QuestionTemplate):
 - Score 1.0: Agent correctly identifies which subnet has higher {metric_display.lower()}
 - Score 0.0: Wrong answer or no clear answer"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """
         Get ground truth by comparing two subnets from SDK.
 
-        Returns the name of the subnet with higher value.
+        Returns GroundTruthResult with the name of the subnet with higher value.
         """
         try:
             import bittensor as bt
@@ -142,7 +142,7 @@ class ComparisonTemplate(QuestionTemplate):
             info2 = subtensor.subnet(id2)
 
             if info1 is None or info2 is None:
-                return None
+                return GroundTruthResult.retry("Could not fetch subnet data")
 
             # Get values based on metric
             if metric == "price":
@@ -152,29 +152,30 @@ class ComparisonTemplate(QuestionTemplate):
                 val1 = float(info1.tao_in.tao) if info1.tao_in else 0
                 val2 = float(info2.tao_in.tao) if info2.tao_in else 0
             else:
-                return None
+                return GroundTruthResult.fail(f"Unknown metric: {metric}")
 
             # Return name of subnet with higher value
-            return name1 if val1 > val2 else name2
+            return GroundTruthResult.ok(name1 if val1 > val2 else name2)
 
-        except Exception:
-            return None
+        except Exception as e:
+            return GroundTruthResult.retry(f"Bittensor SDK error: {e}")
 
     async def validate_answer(
         self, answer: str, validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate comparison answer"""
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         name1 = validation_info.get("subnet1_name", "")
         name2 = validation_info.get("subnet2_name", "")
         answer_lower = answer.lower()

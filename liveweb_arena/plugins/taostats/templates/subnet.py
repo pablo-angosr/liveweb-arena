@@ -8,7 +8,7 @@ from liveweb_arena.core.validators.base import (
 )
 from liveweb_arena.core.validators.validators import NumericToleranceValidator, ExactMatchValidator
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 from .variables import SubnetVariable, MetricVariable, SubnetSpec, MetricSpec, SubnetMetric
 
@@ -122,7 +122,7 @@ Agent should click the address to get the full address from the URL or account p
 - Score 1.0: Values match within tolerance
 - Score 0.0: Values differ significantly"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[Any]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch ground truth from Bittensor network via Python SDK"""
         try:
             import bittensor as bt
@@ -137,38 +137,44 @@ Agent should click the address to get the full address from the URL or account p
             info = subtensor.subnet(subnet_id)
 
             if info is None:
-                return None
+                return GroundTruthResult.fail(f"Subnet {subnet_id} not found")
 
             # Extract requested metric
             if metric == "name":
-                return info.subnet_name or info.subnet_identity.subnet_name
+                name = info.subnet_name or info.subnet_identity.subnet_name
+                if name:
+                    return GroundTruthResult.ok(name)
+                return GroundTruthResult.fail("Subnet name not available")
             elif metric == "owner":
-                return info.owner_coldkey
+                if info.owner_coldkey:
+                    return GroundTruthResult.ok(info.owner_coldkey)
+                return GroundTruthResult.fail("Owner coldkey not available")
             elif metric == "price":
-                return f"τ{info.price.tao:.6f}" if info.price else None
+                if info.price:
+                    return GroundTruthResult.ok(f"τ{info.price.tao:.6f}")
+                return GroundTruthResult.fail("Price not available")
 
-            return None
+            return GroundTruthResult.fail(f"Unknown metric: {metric}")
 
         except Exception as e:
-            # Return None to trigger LLM validation fallback
-            return None
+            return GroundTruthResult.retry(f"Bittensor SDK error: {e}")
 
     async def validate_answer(
         self, answer: str, validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate answer against Bittensor ground truth"""
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
-            # Fallback: signal LLM validation needed
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable, requires LLM validation",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         # Get appropriate validator
         metric = validation_info["metric"]
         validator = self._validators.get(metric)

@@ -125,11 +125,13 @@ class StooqPlugin(BasePlugin):
 
     async def get_ground_truth(self, validation_info: dict):
         """Get ground truth from the appropriate template"""
+        from liveweb_arena.core.ground_truth_trigger import GroundTruthResult
+
         template_name = validation_info.get("template_name")
         template = self._template_instances.get(template_name)
 
         if template is None:
-            return None
+            return GroundTruthResult.fail(f"Unknown template: {template_name}")
 
         return await template.get_ground_truth(validation_info)
 

@@ -11,7 +11,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
 )
 from .variables import INDICES, US_STOCKS
 
@@ -151,7 +151,7 @@ Key validation points:
 2. Downtrend = most indices negative
 3. Mixed = some up, some down significantly"""
 
-    async def _fetch_instrument_data(self, symbol: str) -> Optional[Dict[str, Any]]:
+    async def _fetch_instrument_data(self, symbol: str) -> GroundTruthResult:
         """Fetch data for a single instrument"""
         try:
             async with aiohttp.ClientSession() as session:
@@ -161,15 +161,19 @@ Key validation points:
                     params=params,
                     timeout=aiohttp.ClientTimeout(total=15)
                 ) as response:
+                    if response.status == 404:
+                        return GroundTruthResult.fail(f"Symbol {symbol} not found")
+                    if response.status >= 500:
+                        return GroundTruthResult.retry(f"Server error: HTTP {response.status}")
                     if response.status != 200:
-                        return None
+                        return GroundTruthResult.fail(f"HTTP {response.status}")
                     csv_text = await response.text()
 
             reader = csv.DictReader(io.StringIO(csv_text))
             rows = list(reader)
 
             if not rows:
-                return None
+                return GroundTruthResult.fail(f"No data for {symbol}")
 
             latest = rows[-1]
             result = {
@@ -178,7 +182,6 @@ Key validation points:
                 "date": latest.get("Date", ""),
             }
 
-            # Calculate change percent
             if len(rows) >= 2:
                 prev = rows[-2]
                 prev_close = self._parse_float(prev.get("Close"))
@@ -188,10 +191,14 @@ Key validation points:
                     result["change"] = change
                     result["change_percent"] = change_pct
 
-            return result
+            return GroundTruthResult.ok(result)
 
-        except Exception:
-            return None
+        except aiohttp.ClientError as e:
+            return GroundTruthResult.retry(f"Network error: {e}")
+        except TimeoutError:
+            return GroundTruthResult.retry("Request timeout")
+        except Exception as e:
+            return GroundTruthResult.fail(f"Unexpected error: {e}")
 
     def _parse_float(self, value: Any) -> Optional[float]:
         if value is None:
@@ -201,40 +208,40 @@ Key validation points:
         except (ValueError, TypeError):
             return None
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """
         Fetch market data for all symbols and return readable summary string.
 
-        Returns a string like: "Market direction: UP. Data: aapl.us: 255.53 (+1.04%), ..."
+        Returns GroundTruthResult with string like: "Market direction: UP. Data: aapl.us: 255.53 (+1.04%), ..."
         """
         symbols = validation_info.get("symbols", [])
         summary_type = validation_info.get("summary_type", "us_indices")
 
         if not symbols:
-            return None
+            return GroundTruthResult.fail("No symbols provided")
 
-        # Fetch data for all symbols
         all_data = {}
+        has_retryable_error = False
         for symbol in symbols:
-            data = await self._fetch_instrument_data(symbol)
-            if data:
-                all_data[symbol] = data
+            result = await self._fetch_instrument_data(symbol)
+            if result.success:
+                all_data[symbol] = result.value
+            elif result.retryable:
+                has_retryable_error = True
 
         if len(all_data) < len(symbols) // 2 + 1:
-            # Need at least half the data
-            return None
+            if has_retryable_error:
+                return GroundTruthResult.retry("Failed to fetch enough market data")
+            return GroundTruthResult.fail("Could not fetch data for enough symbols")
 
-        # Calculate summary statistics
         changes = [d.get("change_percent", 0) for d in all_data.values() if d.get("change_percent") is not None]
 
         if not changes:
-            return None
+            return GroundTruthResult.fail("No change data available")
 
         positive_count = sum(1 for c in changes if c > 0)
         negative_count = sum(1 for c in changes if c < 0)
-        avg_change = sum(changes) / len(changes)
 
-        # Determine overall direction
         if positive_count > negative_count:
             direction = "UP"
         elif negative_count > positive_count:
@@ -242,7 +249,6 @@ Key validation points:
         else:
             direction = "MIXED"
 
-        # Build human-readable summary as ground truth
         data_summary = []
         for symbol, data in all_data.items():
             change_pct = data.get("change_percent", 0)
@@ -250,8 +256,7 @@ Key validation points:
             sign = "+" if change_pct >= 0 else ""
             data_summary.append(f"{symbol}: {close:.2f} ({sign}{change_pct:.2f}%)")
 
-        # Return a simple, readable ground truth string for LLM validation
-        return f"Market direction: {direction}. Data: {', '.join(data_summary)}"
+        return GroundTruthResult.ok(f"Market direction: {direction}. Data: {', '.join(data_summary)}")
 
     async def validate_answer(
         self, answer: str, validation_info: Dict[str, Any]
@@ -262,16 +267,18 @@ Key validation points:
         This uses simple heuristics for validation since it's a summary question.
         The LLM validator will also use the ground truth for more nuanced judgment.
         """
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
+
+        ground_truth = result.value
 
         # Parse direction from ground truth string (format: "Market direction: UP/DOWN/MIXED. Data: ...")
         direction = "MIXED"

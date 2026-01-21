@@ -8,7 +8,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 
 
@@ -127,12 +127,12 @@ class RankingTemplate(QuestionTemplate):
 Note: Rankings may shift slightly due to real-time data. Accept if agent's answer matches
 the expected subnet or is within ±1 rank position."""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """
         Calculate ground truth by fetching all subnets and sorting by metric.
 
         Returns:
-            Name of the subnet at the specified rank position.
+            GroundTruthResult with the name of the subnet at the specified rank position.
         """
         try:
             import bittensor as bt
@@ -144,7 +144,7 @@ the expected subnet or is within ±1 rank position."""
             # all_subnets() returns list of DynamicInfo objects directly
             all_subnet_info = subtensor.all_subnets()
             if not all_subnet_info:
-                return None
+                return GroundTruthResult.retry("Failed to fetch subnet list")
 
             # Process all subnets
             subnet_data = []
@@ -154,7 +154,6 @@ the expected subnet or is within ±1 rank position."""
                 try:
                     price = float(info.price.tao) if info.price else 0
                     tao_in = float(info.tao_in.tao) if info.tao_in else 0
-                    # Market cap approximation
                     market_cap = price * tao_in
 
                     name = info.subnet_name or f"Subnet {info.netuid}"
@@ -170,7 +169,7 @@ the expected subnet or is within ±1 rank position."""
                     continue
 
             if len(subnet_data) < target_rank:
-                return None
+                return GroundTruthResult.fail(f"Not enough subnets for rank {target_rank}")
 
             # Sort by the relevant metric (descending)
             sort_key = {
@@ -183,28 +182,29 @@ the expected subnet or is within ±1 rank position."""
 
             # Get subnet at target rank (1-indexed)
             if target_rank <= len(subnet_data):
-                return subnet_data[target_rank - 1]["name"]
+                return GroundTruthResult.ok(subnet_data[target_rank - 1]["name"])
 
-            return None
+            return GroundTruthResult.fail(f"Rank {target_rank} out of range")
 
-        except Exception:
-            return None
+        except Exception as e:
+            return GroundTruthResult.retry(f"Bittensor SDK error: {e}")
 
     async def validate_answer(
         self, answer: str, validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate ranking answer"""
-        expected_name = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if expected_name is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        expected_name = result.value
         answer_lower = answer.lower()
 
         # Check if expected subnet name is in answer

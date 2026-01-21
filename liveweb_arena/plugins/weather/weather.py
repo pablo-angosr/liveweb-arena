@@ -5,6 +5,7 @@ from typing import Dict, List, Type
 
 from liveweb_arena.plugins.base import BasePlugin, SubTask, ValidationResult
 from liveweb_arena.core.validators.base import QuestionTemplate, GeneratedQuestion, get_registered_templates
+from liveweb_arena.core.ground_truth_trigger import GroundTruthResult
 
 # Import templates to trigger registration via decorators
 from . import templates as _  # noqa: F401
@@ -139,7 +140,7 @@ This API provides comprehensive weather data including:
         template = self._template_instances.get(template_name)
 
         if template is None:
-            template = list(self._template_instances.values())[0]
+            return GroundTruthResult.fail(f"Unknown template: {template_name}")
 
         return await template.get_ground_truth(validation_info)
 

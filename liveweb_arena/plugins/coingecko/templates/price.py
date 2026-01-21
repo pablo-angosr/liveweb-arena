@@ -10,7 +10,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 from ..api_client import CoinGeckoClient
 
@@ -242,46 +242,46 @@ class CoinGeckoPriceTemplate(QuestionTemplate):
 - Score 0.0: Values differ by more than 5%
 - Accept formats: $45,123.45, 45123.45, $45,123"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch current price data from CoinGecko API."""
         coin_id = validation_info.get("coin_id", "")
         metric_type = validation_info.get("metric_type", "current_price")
 
         if not coin_id:
-            return None
+            return GroundTruthResult.fail("No coin_id provided")
 
         try:
             data = await CoinGeckoClient.get_coin_market_data(coin_id)
             if not data:
-                return None
+                return GroundTruthResult.retry("No data returned from CoinGecko API")
 
             coin_data = data[0]
 
             if metric_type == "current_price":
                 price = coin_data.get("current_price")
                 if price is not None:
-                    return f"${price:,.2f}"
+                    return GroundTruthResult.ok(f"${price:,.2f}")
 
             elif metric_type == "change_24h":
                 change = coin_data.get("price_change_percentage_24h")
                 if change is not None:
                     sign = "+" if change >= 0 else ""
-                    return f"{sign}{change:.2f}%"
+                    return GroundTruthResult.ok(f"{sign}{change:.2f}%")
 
             elif metric_type == "market_cap":
                 cap = coin_data.get("market_cap")
                 if cap is not None:
                     if cap >= 1e12:
-                        return f"${cap/1e12:.2f} trillion"
+                        return GroundTruthResult.ok(f"${cap/1e12:.2f} trillion")
                     elif cap >= 1e9:
-                        return f"${cap/1e9:.2f} billion"
+                        return GroundTruthResult.ok(f"${cap/1e9:.2f} billion")
                     else:
-                        return f"${cap:,.0f}"
+                        return GroundTruthResult.ok(f"${cap:,.0f}")
 
-            return None
+            return GroundTruthResult.fail(f"Missing {metric_type} data")
 
-        except Exception:
-            return None
+        except Exception as e:
+            return GroundTruthResult.retry(f"API error: {e}")
 
     async def validate_answer(
         self,
@@ -289,17 +289,18 @@ class CoinGeckoPriceTemplate(QuestionTemplate):
         validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate cryptocurrency price answer."""
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         metric_type = validation_info.get("metric_type", "current_price")
         is_percentage = validation_info.get("is_percentage", False)
 

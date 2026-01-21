@@ -8,9 +8,33 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
-from .variables import LocationVariable, LocationSpec
+from .variables import LocationVariable, LocationSpec, LocationType
+
+
+# Major city pairs from different climate zones for interesting comparisons
+CITY_PAIRS = [
+    # Asia vs Europe
+    (("Tokyo", "Tokyo"), ("London", "London")),
+    (("Beijing", "Beijing"), ("Paris", "Paris")),
+    (("Singapore", "Singapore"), ("Berlin", "Berlin")),
+    (("Seoul", "Seoul"), ("Rome", "Rome")),
+    # Americas
+    (("New York", "New+York"), ("Los Angeles", "Los+Angeles")),
+    (("Chicago", "Chicago"), ("Miami", "Miami")),
+    (("Toronto", "Toronto"), ("Mexico City", "Mexico+City")),
+    (("Seattle", "Seattle"), ("Houston", "Houston")),
+    # Cross-continental
+    (("Sydney", "Sydney"), ("Tokyo", "Tokyo")),
+    (("Dubai", "Dubai"), ("Moscow", "Moscow")),
+    (("Mumbai", "Mumbai"), ("Cairo", "Cairo")),
+    (("Hong Kong", "Hong+Kong"), ("Vancouver", "Vancouver")),
+    # Europe
+    (("Paris", "Paris"), ("Madrid", "Madrid")),
+    (("Amsterdam", "Amsterdam"), ("Athens", "Athens")),
+    (("Stockholm", "Stockholm"), ("Lisbon", "Lisbon")),
+]
 
 
 @register_template("weather_comparison")
@@ -38,36 +62,34 @@ class WeatherComparisonTemplate(QuestionTemplate):
 
     def __init__(self):
         super().__init__("weather_comparison")
-        self._location_var = LocationVariable()
 
     def generate(self, seed: int, variant: Optional[int] = None) -> GeneratedQuestion:
         """Generate a weather comparison question."""
         rng = random.Random(seed)
 
-        # Sample two different cities
-        city1 = self._location_var.sample(rng)
-        city2 = self._location_var.sample(rng)
+        # Select a city pair
+        pair = rng.choice(CITY_PAIRS)
+        city1_name, city1_query = pair[0]
+        city2_name, city2_query = pair[1]
 
-        # Ensure they're different
-        attempts = 0
-        while city2.display_name == city1.display_name and attempts < 10:
-            city2 = self._location_var.sample(rng)
-            attempts += 1
+        # Randomly swap order
+        if rng.random() > 0.5:
+            city1_name, city1_query, city2_name, city2_query = city2_name, city2_query, city1_name, city1_query
 
         pattern = rng.choice(self.COMPARISON_PATTERNS)
-        question_text = pattern.format(city1=city1.display_name, city2=city2.display_name)
+        question_text = pattern.format(city1=city1_name, city2=city2_name)
 
         validation_info = {
-            "city1_name": city1.display_name,
-            "city1_query": city1.api_query,
-            "city2_name": city2.display_name,
-            "city2_query": city2.api_query,
+            "city1_name": city1_name,
+            "city1_query": city1_query,
+            "city2_name": city2_name,
+            "city2_query": city2_query,
         }
 
         return GeneratedQuestion(
             question_text=question_text,
-            start_url=f"https://wttr.in/{city1.api_query}",
-            variables={"city1": city1, "city2": city2},
+            start_url=f"https://wttr.in/{city1_query}",
+            variables={"city1_name": city1_name, "city2_name": city2_name},
             validation_info=validation_info,
             template_name=self.name,
             expected_steps=8,  # Need to visit two pages
@@ -82,7 +104,7 @@ class WeatherComparisonTemplate(QuestionTemplate):
 - Score 0.0: Wrong city or unclear answer
 - Accept: "{city1}", "{city1} is warmer", "It's hotter in {city1}", temperature values with comparison"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch temperatures for both cities from wttr.in API."""
         city1_query = validation_info.get("city1_query", "")
         city2_query = validation_info.get("city2_query", "")
@@ -90,7 +112,7 @@ class WeatherComparisonTemplate(QuestionTemplate):
         city2_name = validation_info.get("city2_name", "")
 
         if not city1_query or not city2_query:
-            return None
+            return GroundTruthResult.fail("Missing city queries")
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -98,14 +120,14 @@ class WeatherComparisonTemplate(QuestionTemplate):
                 url1 = f"https://wttr.in/{city1_query}?format=j1"
                 async with session.get(url1, timeout=aiohttp.ClientTimeout(total=15)) as resp1:
                     if resp1.status != 200:
-                        return None
+                        return GroundTruthResult.retry(f"HTTP {resp1.status} for {city1_name}")
                     data1 = await resp1.json()
 
                 # Fetch city2 temperature
                 url2 = f"https://wttr.in/{city2_query}?format=j1"
                 async with session.get(url2, timeout=aiohttp.ClientTimeout(total=15)) as resp2:
                     if resp2.status != 200:
-                        return None
+                        return GroundTruthResult.retry(f"HTTP {resp2.status} for {city2_name}")
                     data2 = await resp2.json()
 
             # Get current temperatures
@@ -113,14 +135,16 @@ class WeatherComparisonTemplate(QuestionTemplate):
             temp2 = int(data2.get("current_condition", [{}])[0].get("temp_C", 0))
 
             if temp1 > temp2:
-                return f"{city1_name} ({temp1}°C vs {temp2}°C)"
+                return GroundTruthResult.ok(f"{city1_name} ({temp1}°C vs {temp2}°C)")
             elif temp2 > temp1:
-                return f"{city2_name} ({temp2}°C vs {temp1}°C)"
+                return GroundTruthResult.ok(f"{city2_name} ({temp2}°C vs {temp1}°C)")
             else:
-                return f"Same temperature ({temp1}°C)"
+                return GroundTruthResult.ok(f"Same temperature ({temp1}°C)")
 
-        except Exception:
-            return None
+        except aiohttp.ClientError as e:
+            return GroundTruthResult.retry(f"Network error: {e}")
+        except Exception as e:
+            return GroundTruthResult.retry(f"API error: {e}")
 
     async def validate_answer(
         self,
@@ -128,17 +152,18 @@ class WeatherComparisonTemplate(QuestionTemplate):
         validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate comparison answer."""
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         city1_name = validation_info.get("city1_name", "").lower()
         city2_name = validation_info.get("city2_name", "").lower()
         answer_lower = answer.lower()

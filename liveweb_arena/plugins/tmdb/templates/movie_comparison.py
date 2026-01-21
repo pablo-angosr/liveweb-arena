@@ -7,7 +7,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 from .variables import MovieVariable, MovieSpec
 from ..api_client import TMDBClient
@@ -78,7 +78,7 @@ class TMDBMovieComparisonTemplate(QuestionTemplate):
             variables={"movie1": movie1, "movie2": movie2, "comp_type": comp_type},
             validation_info=validation_info,
             template_name=self.name,
-            expected_steps=15,  # Harder task needs more steps
+            expected_steps=10,  # Need to visit two movie pages
         )
 
     def _build_question(
@@ -126,7 +126,7 @@ class TMDBMovieComparisonTemplate(QuestionTemplate):
 - Score 0.0: Wrong movie identified or unclear answer
 - Accept formats: "{movie1}", "{movie1} came first", "the first one" (context-dependent)"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Optional[str]:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch comparison data from TMDB API."""
         movie1_id = validation_info.get("movie1_id", "")
         movie2_id = validation_info.get("movie2_id", "")
@@ -135,54 +135,54 @@ class TMDBMovieComparisonTemplate(QuestionTemplate):
         comp_type = validation_info.get("comparison_type", "runtime_which")
 
         if not movie1_id or not movie2_id:
-            return None
+            return GroundTruthResult.fail("Missing movie IDs")
 
         try:
             data1 = await TMDBClient.get_movie(movie1_id)
             data2 = await TMDBClient.get_movie(movie2_id)
 
             if not data1 or not data2:
-                return None
+                return GroundTruthResult.retry("Could not fetch movie data")
 
             if comp_type in ["runtime_which", "runtime_diff"]:
                 runtime1 = data1.get("runtime", 0)
                 runtime2 = data2.get("runtime", 0)
 
                 if runtime1 is None or runtime2 is None:
-                    return None
+                    return GroundTruthResult.fail("Runtime data not available")
 
                 if comp_type == "runtime_which":
                     if runtime1 > runtime2:
-                        return f"{movie1_title} ({runtime1} min vs {runtime2} min)"
+                        return GroundTruthResult.ok(f"{movie1_title} ({runtime1} min vs {runtime2} min)")
                     elif runtime2 > runtime1:
-                        return f"{movie2_title} ({runtime2} min vs {runtime1} min)"
+                        return GroundTruthResult.ok(f"{movie2_title} ({runtime2} min vs {runtime1} min)")
                     else:
-                        return f"Same length ({runtime1} min each)"
+                        return GroundTruthResult.ok(f"Same length ({runtime1} min each)")
                 else:  # runtime_diff
                     diff = runtime1 - runtime2
                     if diff > 0:
-                        return f"{diff} minutes longer"
+                        return GroundTruthResult.ok(f"{diff} minutes longer")
                     elif diff < 0:
-                        return f"{abs(diff)} minutes shorter (or -{abs(diff)} minutes)"
+                        return GroundTruthResult.ok(f"{abs(diff)} minutes shorter (or -{abs(diff)} minutes)")
                     else:
-                        return "0 minutes (same length)"
+                        return GroundTruthResult.ok("0 minutes (same length)")
 
             else:  # release_which
                 date1 = data1.get("release_date", "")
                 date2 = data2.get("release_date", "")
 
                 if not date1 or not date2:
-                    return None
+                    return GroundTruthResult.fail("Release date data not available")
 
                 if date1 < date2:
-                    return f"{movie1_title} ({date1} vs {date2})"
+                    return GroundTruthResult.ok(f"{movie1_title} ({date1} vs {date2})")
                 elif date2 < date1:
-                    return f"{movie2_title} ({date2} vs {date1})"
+                    return GroundTruthResult.ok(f"{movie2_title} ({date2} vs {date1})")
                 else:
-                    return f"Same date ({date1})"
+                    return GroundTruthResult.ok(f"Same date ({date1})")
 
-        except Exception:
-            return None
+        except Exception as e:
+            return GroundTruthResult.retry(f"TMDB API error: {e}")
 
     async def validate_answer(
         self,
@@ -190,17 +190,18 @@ class TMDBMovieComparisonTemplate(QuestionTemplate):
         validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate movie comparison answer."""
-        ground_truth = await self.get_ground_truth(validation_info)
+        result = await self.get_ground_truth(validation_info)
 
-        if ground_truth is None:
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details="Ground truth unavailable",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         comp_type = validation_info.get("comparison_type", "runtime_which")
 
         if comp_type == "runtime_which":

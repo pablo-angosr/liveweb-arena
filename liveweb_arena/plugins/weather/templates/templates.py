@@ -8,7 +8,7 @@ import httpx
 from liveweb_arena.core.validators.base import QuestionTemplate, GeneratedQuestion, ValidationResult, register_template
 from liveweb_arena.core.validators.validators import NumericToleranceValidator, BooleanValidator, ExactMatchValidator
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig
+    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
 )
 from .variables import (
     LocationVariable, DateVariable, WeatherMetricVariable,
@@ -252,7 +252,7 @@ class LocationNameWeatherTemplate(QuestionTemplate):
             metric=metric.display_name,
         )
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Any:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch ground truth from wttr.in API"""
         location = validation_info["location"]
         target_date = validation_info["target_date"]  # YYYY-MM-DD format or "now"
@@ -262,10 +262,22 @@ class LocationNameWeatherTemplate(QuestionTemplate):
 
         url = f"https://wttr.in/{location}?format=j1"
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            data = response.json()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.get(url)
+                if response.status_code == 404:
+                    return GroundTruthResult.fail(f"Location {location} not found")
+                if response.status_code >= 500:
+                    return GroundTruthResult.retry(f"Server error: HTTP {response.status_code}")
+                if response.status_code != 200:
+                    return GroundTruthResult.fail(f"HTTP {response.status_code}")
+                data = response.json()
+        except httpx.TimeoutException:
+            return GroundTruthResult.retry("Request timeout")
+        except httpx.ConnectError as e:
+            return GroundTruthResult.retry(f"Connection error: {e}")
+        except Exception as e:
+            return GroundTruthResult.fail(f"Unexpected error: {e}")
 
         value = None
 
@@ -274,13 +286,12 @@ class LocationNameWeatherTemplate(QuestionTemplate):
             current = data.get("current_condition", [{}])[0]
             value = current.get(api_field)
 
-            # Convert boolean for rain questions (use weatherDesc for current)
             if is_boolean and value is not None:
-                return "Yes" if float(value) > 30 else "No"
+                return GroundTruthResult.ok("Yes" if float(value) > 30 else "No")
 
             if value is not None and unit:
-                return f"{value}{unit}"
-            return value
+                return GroundTruthResult.ok(f"{value}{unit}")
+            return GroundTruthResult.ok(value) if value is not None else GroundTruthResult.fail("No current data")
 
         # For date-based queries, find day by date (timezone-safe)
         weather = data.get("weather", [])
@@ -293,10 +304,8 @@ class LocationNameWeatherTemplate(QuestionTemplate):
                 break
 
         if day_data is None:
-            return None
+            return GroundTruthResult.fail(f"No forecast data for {target_date}")
 
-        # For metrics shown on HTML page, use only the 4 displayed time slots
-        # HTML shows Morning(9:00)/Noon(12:00)/Evening(18:00)/Night(21:00) = indices 3,4,6,7
         display_indices = [3, 4, 6, 7]
         hourly = day_data.get("hourly", [])
 
@@ -306,39 +315,28 @@ class LocationNameWeatherTemplate(QuestionTemplate):
                 if temps:
                     value = max(temps) if api_field == "maxtempC" else min(temps)
         elif api_field == "chanceofrain":
-            # For chance of rain, use MAX of displayed time slots (if any slot has 100%, it will rain)
             if hourly and len(hourly) >= 8:
                 chances = [int(hourly[i].get("chanceofrain", 0)) for i in display_indices]
                 if chances:
                     value = max(chances)
         elif is_today:
-            # Current conditions for today
             current = data.get("current_condition", [{}])[0]
             value = current.get(api_field)
-
-            # If not in current, check today's forecast
             if value is None:
                 value = day_data.get(api_field)
         else:
-            # Future forecast
             value = day_data.get(api_field)
-
-            # Some fields are in hourly data
             if value is None and hourly:
-                # Average over hourly values
                 values = [float(h.get(api_field, 0)) for h in hourly if h.get(api_field)]
                 if values:
                     value = sum(values) / len(values)
 
-        # Convert boolean for rain questions
         if is_boolean and value is not None:
-            # Chance of rain > 30% means "will rain"
-            return "Yes" if float(value) > 30 else "No"
+            return GroundTruthResult.ok("Yes" if float(value) > 30 else "No")
 
-        # Return value with unit for better AI validation
         if value is not None and unit:
-            return f"{value}{unit}"
-        return value
+            return GroundTruthResult.ok(f"{value}{unit}")
+        return GroundTruthResult.ok(value) if value is not None else GroundTruthResult.fail("Data not found")
 
     async def validate_answer(
         self,
@@ -346,16 +344,18 @@ class LocationNameWeatherTemplate(QuestionTemplate):
         validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate answer against real-time ground truth"""
-        try:
-            ground_truth = await self.get_ground_truth(validation_info)
-        except Exception as e:
+        result = await self.get_ground_truth(validation_info)
+
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details=f"Failed to get ground truth: {e}",
+                details=f"Ground truth unavailable: {result.error}",
             )
+
+        ground_truth = result.value
 
         # Get appropriate validator
         metric_type = validation_info["metric_type"]
@@ -536,7 +536,7 @@ class CurrentWeatherTemplate(QuestionTemplate):
 - Score 1.0: Values match within tolerance
 - Score 0.0: Values differ significantly"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Any:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch current conditions from wttr.in API"""
         location = validation_info["location"]
         api_field = validation_info["api_field"]
@@ -544,17 +544,31 @@ class CurrentWeatherTemplate(QuestionTemplate):
 
         url = f"https://wttr.in/{location}?format=j1"
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            data = response.json()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.get(url)
+                if response.status_code == 404:
+                    return GroundTruthResult.fail(f"Location {location} not found")
+                if response.status_code >= 500:
+                    return GroundTruthResult.retry(f"Server error: HTTP {response.status_code}")
+                if response.status_code != 200:
+                    return GroundTruthResult.fail(f"HTTP {response.status_code}")
+                data = response.json()
+        except httpx.TimeoutException:
+            return GroundTruthResult.retry("Request timeout")
+        except httpx.ConnectError as e:
+            return GroundTruthResult.retry(f"Connection error: {e}")
+        except Exception as e:
+            return GroundTruthResult.fail(f"Unexpected error: {e}")
 
         current = data.get("current_condition", [{}])[0]
         value = current.get(api_field)
 
-        if value is not None and unit:
-            return f"{value}{unit}"
-        return value
+        if value is None:
+            return GroundTruthResult.fail(f"Field {api_field} not in current conditions")
+        if unit:
+            return GroundTruthResult.ok(f"{value}{unit}")
+        return GroundTruthResult.ok(value)
 
     async def validate_answer(
         self,
@@ -562,17 +576,18 @@ class CurrentWeatherTemplate(QuestionTemplate):
         validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate answer against current conditions"""
-        try:
-            ground_truth = await self.get_ground_truth(validation_info)
-        except Exception as e:
+        result = await self.get_ground_truth(validation_info)
+
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details=f"Failed to get ground truth: {e}",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         metric_type = validation_info["metric_type"]
         validator = self._validators.get(metric_type)
 
@@ -778,7 +793,7 @@ class MultiDayWeatherTemplate(QuestionTemplate):
 - Score 0.0: Most values are wrong or answer format is completely different
 - Compare each day's value independently"""
 
-    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> Any:
+    async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch ground truth for multi-day query"""
         location = validation_info["location"]
         num_days = validation_info["num_days"]
@@ -788,32 +803,40 @@ class MultiDayWeatherTemplate(QuestionTemplate):
 
         url = f"https://wttr.in/{location}?format=j1"
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            data = response.json()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.get(url)
+                if response.status_code == 404:
+                    return GroundTruthResult.fail(f"Location {location} not found")
+                if response.status_code >= 500:
+                    return GroundTruthResult.retry(f"Server error: HTTP {response.status_code}")
+                if response.status_code != 200:
+                    return GroundTruthResult.fail(f"HTTP {response.status_code}")
+                data = response.json()
+        except httpx.TimeoutException:
+            return GroundTruthResult.retry("Request timeout")
+        except httpx.ConnectError as e:
+            return GroundTruthResult.retry(f"Connection error: {e}")
+        except Exception as e:
+            return GroundTruthResult.fail(f"Unexpected error: {e}")
 
         weather = data.get("weather", [])
 
         if is_boolean:
-            # Check if any day has rain
             for i in range(min(num_days, len(weather))):
                 day = weather[i]
                 hourly = day.get("hourly", [])
                 for h in hourly:
                     chance = float(h.get("chanceofrain", 0))
                     if chance > 30:
-                        return "Yes"
-            return "No"
+                        return GroundTruthResult.ok("Yes")
+            return GroundTruthResult.ok("No")
 
-        # Collect daily values
         daily_values = []
         daily_dates = []
         for i in range(min(num_days, len(weather))):
             day_data = weather[i]
             date_str = day_data.get("date", f"Day {i+1}")
-
-            # Use only the 4 time slots shown on HTML: indices 3(9:00), 4(12:00), 6(18:00), 7(21:00)
             display_indices = [3, 4, 6, 7]
             hourly = day_data.get("hourly", [])
 
@@ -840,22 +863,19 @@ class MultiDayWeatherTemplate(QuestionTemplate):
                 daily_dates.append(date_str)
 
         if not daily_values:
-            return None
+            return GroundTruthResult.fail("No weather data found")
 
         metric_type = validation_info.get("metric_type", "")
         unit = "°C" if "temp" in metric_type.lower() else ""
 
         if question_type == MultiDayQuestionType.AVERAGE:
-            # Return single average value
             avg = sum(daily_values) / len(daily_values)
-            return f"{avg:.1f}{unit}" if unit else avg
+            return GroundTruthResult.ok(f"{avg:.1f}{unit}" if unit else avg)
         else:
-            # Return list of daily values with dates
-            # Format: "2026-01-14: 19°C, 2026-01-15: 20°C"
             parts = []
             for date, val in zip(daily_dates, daily_values):
                 parts.append(f"{date}: {int(val)}{unit}")
-            return ", ".join(parts)
+            return GroundTruthResult.ok(", ".join(parts))
 
     async def validate_answer(
         self,
@@ -863,17 +883,18 @@ class MultiDayWeatherTemplate(QuestionTemplate):
         validation_info: Dict[str, Any]
     ) -> ValidationResult:
         """Validate answer for multi-day query"""
-        try:
-            ground_truth = await self.get_ground_truth(validation_info)
-        except Exception as e:
+        result = await self.get_ground_truth(validation_info)
+
+        if not result.success:
             return ValidationResult(
                 score=0.0,
                 is_correct=False,
                 expected=None,
                 actual=answer,
-                details=f"Failed to get ground truth: {e}",
+                details=f"Ground truth unavailable: {result.error}",
             )
 
+        ground_truth = result.value
         metric_type = validation_info["metric_type"]
         validator = self._validators.get(metric_type)
 

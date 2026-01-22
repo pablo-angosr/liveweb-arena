@@ -99,19 +99,16 @@ class CoinGeckoATHTemplate(QuestionTemplate):
         if metric_type == "ath_change_percentage":
             return """Task-Specific Rules (CoinGecko - ATH Change):
 - ATH change percentage is negative (current price below ATH)
-- Score 1.0: Percentage within 3 points of expected
-- Score 0.5: Percentage within 10 points
-- Score 0.0: More than 10 points off
+- Score 1.0: Percentage within 5pp of expected
+- Score 0.0: More than 5pp off
 - Accept formats: "-75%", "-75.5%", "75% below ATH", "down 75%"
 - Note: Positive values also accepted (agent may report as distance)"""
 
         return """Task-Specific Rules (CoinGecko - ATH Price):
 - ATH prices are historical and stable (don't change unless new ATH)
-- Score 1.0: Price within 5% of expected
-- Score 0.5: Price within 15% of expected
-- Score 0.0: More than 15% off
-- Accept formats: "$69,000", "69000", "$69K", "69 thousand"
-- Note: ATH date may also appear on the page"""
+- Score 1.0: Price within 10% of expected
+- Score 0.0: More than 10% off
+- Accept formats: "$69,000", "69000", "$69K", "69 thousand""""
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch ATH data from CoinGecko API."""
@@ -226,21 +223,13 @@ class CoinGeckoATHTemplate(QuestionTemplate):
 
                 diff = abs(expected_pct - actual_pct)
 
-                if diff <= 3:
+                if diff <= 5:
                     return ValidationResult(
                         score=1.0,
                         is_correct=True,
                         expected=ground_truth,
                         actual=answer,
-                        details=f"Within 3pp tolerance (diff: {diff:.1f}pp)",
-                    )
-                elif diff <= 10:
-                    return ValidationResult(
-                        score=0.5,
-                        is_correct=False,
-                        expected=ground_truth,
-                        actual=answer,
-                        details=f"Within 10pp tolerance (diff: {diff:.1f}pp)",
+                        details=f"Within 5pp tolerance (diff: {diff:.1f}pp)",
                     )
 
             return ValidationResult(
@@ -266,21 +255,13 @@ class CoinGeckoATHTemplate(QuestionTemplate):
 
         diff_pct = abs(actual_val - expected_val) / expected_val * 100
 
-        if diff_pct <= 5:
+        if diff_pct <= 10:
             return ValidationResult(
                 score=1.0,
                 is_correct=True,
                 expected=ground_truth,
                 actual=answer,
-                details=f"Within 5% tolerance (diff: {diff_pct:.1f}%)",
-            )
-        elif diff_pct <= 15:
-            return ValidationResult(
-                score=0.5,
-                is_correct=False,
-                expected=ground_truth,
-                actual=answer,
-                details=f"Within 15% tolerance (diff: {diff_pct:.1f}%)",
+                details=f"Within 10% tolerance (diff: {diff_pct:.1f}%)",
             )
         else:
             return ValidationResult(

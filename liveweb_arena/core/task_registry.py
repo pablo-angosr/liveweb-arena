@@ -65,6 +65,20 @@ class TaskRegistry:
         36: ("coingecko", "coingecko_ath"),
         37: ("coingecko", "coingecko_performance"),
 
+        # TMDB templates
+        40: ("tmdb", "tmdb_movie_info"),
+        41: ("tmdb", "tmdb_movie_cast"),
+        42: ("tmdb", "tmdb_movie_comparison"),
+        43: ("tmdb", "tmdb_movie_crew"),
+        44: ("tmdb", "tmdb_person_filmography"),
+        45: ("tmdb", "tmdb_movie_collection"),
+        46: ("tmdb", "tmdb_aggregate"),
+        47: ("tmdb", "tmdb_cast_position"),
+        48: ("tmdb", "tmdb_recent_works"),
+
+        # Hybrid cross-site templates
+        50: ("hybrid", "hybrid_price_ratio"),
+
         # Add new templates here with new IDs...
     }
 

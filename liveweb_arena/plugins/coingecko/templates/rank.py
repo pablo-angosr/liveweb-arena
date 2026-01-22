@@ -62,10 +62,9 @@ class CoinGeckoRankTemplate(QuestionTemplate):
 
     def get_validation_rules(self, validation_info: Dict[str, Any]) -> str:
         return """Task-Specific Rules (CoinGecko - Market Rank):
-- Ranks change frequently but typically within a few positions
-- Score 1.0: Exact rank match or within 1 position
-- Score 0.5: Within 3 positions
-- Score 0.0: More than 3 positions off
+- Ranks can change in real-time due to market cap fluctuations
+- Score 1.0: Within 2 positions of expected
+- Score 0.0: More than 2 positions off
 - Accept formats: "#5", "5", "5th", "rank 5", "ranked #5", "position 5"
 - Note: Lower rank number = higher market cap (rank 1 is highest)"""
 
@@ -134,21 +133,13 @@ class CoinGeckoRankTemplate(QuestionTemplate):
 
         diff = abs(actual_rank - expected_rank)
 
-        if diff <= 1:
+        if diff <= 2:
             return ValidationResult(
                 score=1.0,
                 is_correct=True,
                 expected=ground_truth,
                 actual=answer,
                 details=f"Rank match (diff: {diff})",
-            )
-        elif diff <= 3:
-            return ValidationResult(
-                score=0.5,
-                is_correct=False,
-                expected=ground_truth,
-                actual=answer,
-                details=f"Within 3 positions (diff: {diff})",
             )
         else:
             return ValidationResult(

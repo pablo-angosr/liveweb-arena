@@ -62,8 +62,7 @@ class CoinGeckoVolumeTemplate(QuestionTemplate):
     def get_validation_rules(self, validation_info: Dict[str, Any]) -> str:
         return """Task-Specific Rules (CoinGecko - 24h Volume):
 - Trading volume fluctuates frequently
-- Score 1.0: Values match within 10% tolerance
-- Score 0.5: Values match within 20% tolerance
+- Score 1.0: Values match within 20% tolerance
 - Score 0.0: Values differ by more than 20%
 - Accept formats: $1.2B, $1.2 billion, 1200000000, 1.2B USD"""
 
@@ -123,18 +122,10 @@ class CoinGeckoVolumeTemplate(QuestionTemplate):
 
         diff_pct = abs(actual_val - expected_val) / expected_val * 100
 
-        if diff_pct <= 10:
+        if diff_pct <= 20:
             return ValidationResult(
                 score=1.0,
                 is_correct=True,
-                expected=ground_truth,
-                actual=answer,
-                details=f"Within 10% tolerance (diff: {diff_pct:.1f}%)",
-            )
-        elif diff_pct <= 20:
-            return ValidationResult(
-                score=0.5,
-                is_correct=False,
                 expected=ground_truth,
                 actual=answer,
                 details=f"Within 20% tolerance (diff: {diff_pct:.1f}%)",

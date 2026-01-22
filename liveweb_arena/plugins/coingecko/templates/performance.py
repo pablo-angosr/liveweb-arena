@@ -202,11 +202,9 @@ class CoinGeckoPerformanceTemplate(QuestionTemplate):
 
         return """Task-Specific Rules (CoinGecko - 7-Day Price Performance):
 - Performance is the 7-day percentage price change
-- Score 1.0: Percentage within 2 points of expected
-- Score 0.5: Percentage within 5 points
-- Score 0.0: More than 5 points off
-- Accept formats: "+5.2%", "-3.1%", "up 5%", "down 3%", "declined 18%"
-- Hint: Look for "With a price decline/increase of X% in the last 7 days" """
+- Score 1.0: Percentage within 3pp of expected
+- Score 0.0: More than 3pp off
+- Accept formats: "+5.2%", "-3.1%", "up 5%", "down 3%", "declined 18%""""
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch 7-day performance data from CoinGecko API."""
@@ -357,21 +355,13 @@ class CoinGeckoPerformanceTemplate(QuestionTemplate):
 
         diff = abs(expected_pct - actual_pct)
 
-        if diff <= 2:
+        if diff <= 3:
             return ValidationResult(
                 score=1.0,
                 is_correct=True,
                 expected=ground_truth,
                 actual=answer,
-                details=f"Within 2pp tolerance (diff: {diff:.2f}pp)",
-            )
-        elif diff <= 5:
-            return ValidationResult(
-                score=0.5,
-                is_correct=False,
-                expected=ground_truth,
-                actual=answer,
-                details=f"Within 5pp tolerance (diff: {diff:.2f}pp)",
+                details=f"Within 3pp tolerance (diff: {diff:.2f}pp)",
             )
         else:
             return ValidationResult(

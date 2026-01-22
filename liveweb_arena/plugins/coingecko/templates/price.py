@@ -224,9 +224,8 @@ class CoinGeckoPriceTemplate(QuestionTemplate):
 
         if is_percentage:
             return """Task-Specific Rules (CoinGecko - 24h Change):
-- Score 1.0: Percentage values match within 0.5 points AND same direction (+/-)
-- Score 0.5: Correct direction but values differ by 0.5-2 points
-- Score 0.0: Wrong direction or values differ by more than 2 points
+- Score 1.0: Percentage values match within 2pp AND same direction (+/-)
+- Score 0.0: Wrong direction or values differ by more than 2pp
 - Accept formats: +5.2%, 5.2%, -3.1%, up 5%, down 3%"""
 
         if metric_type == "market_cap":
@@ -237,8 +236,7 @@ class CoinGeckoPriceTemplate(QuestionTemplate):
 
         return """Task-Specific Rules (CoinGecko - Current Price):
 - Cryptocurrency prices are highly volatile
-- Score 1.0: Values match within 2% tolerance
-- Score 0.5: Values match within 5% tolerance
+- Score 1.0: Values match within 5% tolerance
 - Score 0.0: Values differ by more than 5%
 - Accept formats: $45,123.45, 45123.45, $45,123"""
 
@@ -359,18 +357,10 @@ class CoinGeckoPriceTemplate(QuestionTemplate):
 
         diff_pct = abs(actual_val - expected_val) / expected_val * 100
 
-        if diff_pct <= 2:
+        if diff_pct <= 5:
             return ValidationResult(
                 score=1.0,
                 is_correct=True,
-                expected=expected,
-                actual=answer,
-                details=f"Within 2% tolerance (diff: {diff_pct:.1f}%)",
-            )
-        elif diff_pct <= 5:
-            return ValidationResult(
-                score=0.5,
-                is_correct=False,
                 expected=expected,
                 actual=answer,
                 details=f"Within 5% tolerance (diff: {diff_pct:.1f}%)",
@@ -419,17 +409,6 @@ class CoinGeckoPriceTemplate(QuestionTemplate):
                 actual_val = -actual_val
 
         if actual_val is None:
-            # Check if just says "up" or "down" without number
-            if is_up and expected_val > 0:
-                return ValidationResult(
-                    score=0.5, is_correct=False, expected=expected,
-                    actual=answer, details="Correct direction but no specific value",
-                )
-            elif is_down and expected_val < 0:
-                return ValidationResult(
-                    score=0.5, is_correct=False, expected=expected,
-                    actual=answer, details="Correct direction but no specific value",
-                )
             return ValidationResult(
                 score=0.0, is_correct=False, expected=expected,
                 actual=answer, details="Could not parse percentage value",
@@ -439,14 +418,9 @@ class CoinGeckoPriceTemplate(QuestionTemplate):
         same_direction = (expected_val >= 0 and actual_val >= 0) or (expected_val < 0 and actual_val < 0)
         diff = abs(actual_val - expected_val)
 
-        if same_direction and diff <= 0.5:
+        if same_direction and diff <= 2:
             return ValidationResult(
                 score=1.0, is_correct=True, expected=expected,
-                actual=answer, details=f"Within 0.5pp tolerance (diff: {diff:.2f}pp)",
-            )
-        elif same_direction and diff <= 2:
-            return ValidationResult(
-                score=0.5, is_correct=False, expected=expected,
                 actual=answer, details=f"Within 2pp tolerance (diff: {diff:.2f}pp)",
             )
         else:

@@ -139,15 +139,13 @@ class CoinGeckoSupplyTemplate(QuestionTemplate):
 
         if metric_type == "circulating_percentage":
             return """Task-Specific Rules (CoinGecko - Supply Percentage):
-- Score 1.0: Percentage within 2 points of expected
-- Score 0.5: Percentage within 5 points
-- Score 0.0: More than 5 points off
-- Accept formats: "90%", "90.5%", "about 90%", "approximately 90 percent" """
+- Score 1.0: Percentage within 5pp of expected
+- Score 0.0: More than 5pp off
+- Accept formats: "90%", "90.5%", "about 90%", "approximately 90 percent""""
 
         return """Task-Specific Rules (CoinGecko - Supply):
 - Supply numbers are large and change slowly
-- Score 1.0: Value within 5% of expected
-- Score 0.5: Value within 10% of expected
+- Score 1.0: Value within 10% of expected
 - Score 0.0: More than 10% off or wrong metric
 - Accept formats: "21M", "21 million", "21,000,000", "21000000"
 - Note: Circulating < Total <= Max (when max exists)"""
@@ -264,18 +262,10 @@ class CoinGeckoSupplyTemplate(QuestionTemplate):
                 actual_pct = float(act_match.group(1))
                 diff = abs(expected_pct - actual_pct)
 
-                if diff <= 2:
+                if diff <= 5:
                     return ValidationResult(
                         score=1.0,
                         is_correct=True,
-                        expected=ground_truth,
-                        actual=answer,
-                        details=f"Within 2pp tolerance (diff: {diff:.1f}pp)",
-                    )
-                elif diff <= 5:
-                    return ValidationResult(
-                        score=0.5,
-                        is_correct=False,
                         expected=ground_truth,
                         actual=answer,
                         details=f"Within 5pp tolerance (diff: {diff:.1f}pp)",
@@ -304,18 +294,10 @@ class CoinGeckoSupplyTemplate(QuestionTemplate):
 
         diff_pct = abs(actual_val - expected_val) / expected_val * 100
 
-        if diff_pct <= 5:
+        if diff_pct <= 10:
             return ValidationResult(
                 score=1.0,
                 is_correct=True,
-                expected=ground_truth,
-                actual=answer,
-                details=f"Within 5% tolerance (diff: {diff_pct:.1f}%)",
-            )
-        elif diff_pct <= 10:
-            return ValidationResult(
-                score=0.5,
-                is_correct=False,
                 expected=ground_truth,
                 actual=answer,
                 details=f"Within 10% tolerance (diff: {diff_pct:.1f}%)",

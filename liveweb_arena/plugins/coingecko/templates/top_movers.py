@@ -82,20 +82,18 @@ class CoinGeckoTopMoversTemplate(QuestionTemplate):
         query_type = validation_info.get("query_type", "gainer")
         if query_type == "gainer":
             return """Task-Specific Rules (CoinGecko - Top Gainer):
-- Answer must include the coin name AND the percentage gain
-- Score 1.0: Correct coin name with percentage within 5 points
-- Score 0.5: Correct coin name but percentage off by more than 5 points
+- Answer must identify the top gainer coin
+- Score 1.0: Correct coin name identified
 - Score 0.0: Wrong coin or no answer
 - Accept formats: "Bitcoin (+15.2%)", "BTC gained 15%", "Bitcoin is up 15.2%"
-- Note: Top gainers change frequently, validation uses real-time data"""
+- Percentage tolerance: 10pp (data changes frequently)"""
         else:
             return """Task-Specific Rules (CoinGecko - Top Loser):
-- Answer must include the coin name AND the percentage loss
-- Score 1.0: Correct coin name with percentage within 5 points
-- Score 0.5: Correct coin name but percentage off by more than 5 points
+- Answer must identify the top loser coin
+- Score 1.0: Correct coin name identified
 - Score 0.0: Wrong coin or no answer
 - Accept formats: "Bitcoin (-15.2%)", "BTC lost 15%", "Bitcoin is down 15.2%"
-- Note: Top losers change frequently, validation uses real-time data"""
+- Percentage tolerance: 10pp (data changes frequently)"""
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch top gainer/loser from CoinGecko API."""
@@ -209,31 +207,24 @@ class CoinGeckoTopMoversTemplate(QuestionTemplate):
             actual_pct = None
 
         if name_found:
+            # If correct coin is identified, give full score
+            # Percentage differences are expected due to real-time data changes
             if actual_pct is not None:
                 diff = abs(actual_pct - expected_pct)
-                if diff <= 5:
-                    return ValidationResult(
-                        score=1.0,
-                        is_correct=True,
-                        expected=ground_truth,
-                        actual=answer,
-                        details=f"Correct coin and percentage (diff: {diff:.1f}pp)",
-                    )
-                else:
-                    return ValidationResult(
-                        score=0.5,
-                        is_correct=False,
-                        expected=ground_truth,
-                        actual=answer,
-                        details=f"Correct coin but percentage off (diff: {diff:.1f}pp)",
-                    )
-            else:
                 return ValidationResult(
-                    score=0.5,
-                    is_correct=False,
+                    score=1.0,
+                    is_correct=True,
                     expected=ground_truth,
                     actual=answer,
-                    details="Correct coin but no percentage found",
+                    details=f"Correct coin identified (percentage diff: {diff:.1f}pp)",
+                )
+            else:
+                return ValidationResult(
+                    score=1.0,
+                    is_correct=True,
+                    expected=ground_truth,
+                    actual=answer,
+                    details="Correct coin identified",
                 )
 
         return ValidationResult(

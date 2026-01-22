@@ -101,9 +101,8 @@ class TMDBMovieCastTemplate(QuestionTemplate):
         if position == "lead":
             return """Task-Specific Rules (TMDB - Lead Actor):
 - Score 1.0: The first billed actor's name is mentioned (case insensitive)
-- Score 0.5: A top-3 billed actor is mentioned but not the lead
-- Score 0.0: No top-3 cast member mentioned
-- Accept partial names if uniquely identifying"""
+- Score 0.0: Lead actor not mentioned
+- Accept partial names (last name) if uniquely identifying"""
 
         if position == "top_3":
             return """Task-Specific Rules (TMDB - Top 3 Cast):

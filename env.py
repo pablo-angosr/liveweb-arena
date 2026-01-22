@@ -19,7 +19,7 @@ from liveweb_arena.plugins.stooq import StooqPlugin
 from liveweb_arena.plugins.coingecko import CoinGeckoPlugin
 from liveweb_arena.plugins.tmdb import TMDBPlugin
 from liveweb_arena.core.validators.llm_validator import validate_answers_with_llm
-from liveweb_arena.utils.llm_client import LLMClient
+from liveweb_arena.utils.llm_client import LLMClient, LLMFatalError
 from liveweb_arena.utils.logger import log
 
 
@@ -232,7 +232,7 @@ class Actor:
 
             # Track failure reasons
             failure_reason = None
-            agent_timeout = False
+            llm_error_message = None
 
             try:
                 trajectory, final_answer, usage = await asyncio.wait_for(
@@ -244,9 +244,15 @@ class Actor:
                     failure_reason = "max_steps_reached"
                     log("Actor", "Max steps reached without completion - marking as failed", force=True)
             except asyncio.TimeoutError:
-                agent_timeout = True
                 failure_reason = "agent_timeout"
                 log("Actor", f"Agent timeout after {timeout}s", force=True)
+                trajectory = agent_loop.get_trajectory()
+                final_answer = agent_loop.get_final_answer()
+                usage = agent_loop.get_usage()
+            except LLMFatalError as e:
+                failure_reason = "llm_error"
+                llm_error_message = str(e)
+                log("Actor", f"LLM fatal error: {e}", force=True)
                 trajectory = agent_loop.get_trajectory()
                 final_answer = agent_loop.get_final_answer()
                 usage = agent_loop.get_usage()
@@ -311,7 +317,7 @@ class Actor:
             conversation = self._build_conversation(task, trajectory)
 
             # Build result with answer details array in metadata
-            return {
+            result = {
                 "task_name": f"liveweb_arena:{num_subtasks}tasks",
                 "score": total_score,
                 "success": success,
@@ -328,6 +334,12 @@ class Actor:
                     "failure_reason": failure_reason,
                 },
             }
+
+            # Add top-level error field if there was an LLM error
+            if llm_error_message:
+                result["error"] = llm_error_message
+
+            return result
 
         finally:
             # Always close the session

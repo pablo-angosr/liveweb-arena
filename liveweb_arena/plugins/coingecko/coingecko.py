@@ -95,6 +95,7 @@ class CoinGeckoPlugin(BasePlugin):
                 **question.validation_info,
             },
             answer_tag="",
+            expected_steps=question.expected_steps,
         )
 
     async def validate_answer(

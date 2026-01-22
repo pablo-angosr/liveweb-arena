@@ -10,6 +10,20 @@ import openai
 from .logger import log
 
 
+class LLMFatalError(Exception):
+    """
+    Raised when LLM errors exhaust all retries.
+
+    This indicates an unrecoverable error that should terminate evaluation
+    immediately rather than continuing with degraded results.
+    """
+
+    def __init__(self, message: str, original_error: Exception = None, attempts: int = 0):
+        super().__init__(message)
+        self.original_error = original_error
+        self.attempts = attempts
+
+
 class LLMClient:
     """
     OpenAI-compatible LLM client.
@@ -24,9 +38,9 @@ class LLMClient:
     RETRY_STATUS_CODES = {429, 503, 502, 500}
 
     # Retry configuration
-    MAX_RETRIES = 3
+    MAX_RETRIES = 10  # Increased for rate limit resilience
     BASE_DELAY = 1.0  # seconds
-    MAX_DELAY = 10.0  # seconds
+    MAX_DELAY = 30.0  # seconds
 
     # Default timeout per request (should be less than total eval timeout)
     DEFAULT_TIMEOUT = 600  # seconds

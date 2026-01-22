@@ -6,7 +6,7 @@ from typing import Any, Callable, List, Optional, Tuple
 from .browser import BrowserSession
 from .models import BrowserAction, CompositeTask, TrajectoryStep
 from .agent_policy import AgentPolicy
-from ..utils.llm_client import LLMClient
+from ..utils.llm_client import LLMClient, LLMFatalError
 from ..utils.logger import log
 
 
@@ -172,7 +172,8 @@ class AgentLoop:
 
             except Exception as e:
                 consecutive_errors += 1
-                log("Agent", f"LLM error ({consecutive_errors}/3): {type(e).__name__}", force=True)
+                max_consecutive = 3
+                log("Agent", f"LLM error ({consecutive_errors}/{max_consecutive}): {type(e).__name__}: {e}", force=True)
 
                 self._trajectory.append(TrajectoryStep(
                     step_num=step_num,
@@ -182,8 +183,13 @@ class AgentLoop:
                     action_result="LLM call failed",
                 ))
 
-                if consecutive_errors >= 3:
-                    break
+                if consecutive_errors >= max_consecutive:
+                    # Raise fatal error to terminate evaluation immediately
+                    raise LLMFatalError(
+                        f"LLM errors exhausted after {consecutive_errors} consecutive failures: {type(e).__name__}: {e}",
+                        original_error=e,
+                        attempts=consecutive_errors,
+                    )
 
                 obs = await self._session.execute_action(
                     BrowserAction(action_type="wait", params={"seconds": 2})

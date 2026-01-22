@@ -36,8 +36,8 @@ async def main():
     parser.add_argument(
         "--model",
         type=str,
-        default="zai-org/GLM-4.7-TEE",
-        help="LLM model name (default: zai-org/GLM-4.7-TEE)",
+        default="openai/gpt-oss-120b",
+        help="LLM model name (default: openai/gpt-oss-120b)",
     )
     parser.add_argument(
         "--base-url",

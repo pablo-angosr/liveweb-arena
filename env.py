@@ -344,9 +344,9 @@ class Actor:
                 },
             }
 
-            # Add top-level error field if there was an LLM error
-            if llm_error_message:
-                result["error"] = llm_error_message
+            # Add top-level error field if there was a fatal error
+            if fatal_error_message:
+                result["error"] = fatal_error_message
 
             return result
 

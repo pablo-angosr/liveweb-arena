@@ -192,9 +192,13 @@ class HybridTopPerformerTemplate(QuestionTemplate):
             except Exception as e:
                 errors.append(f"{name}: {str(e)}")
 
+        # All assets must have data for fair evaluation
+        if errors:
+            error_msg = "; ".join(errors)
+            return GroundTruthResult.retry(f"Could not fetch all asset data: {error_msg}")
+
         if not results:
-            error_msg = "; ".join(errors) if errors else "No data fetched"
-            return GroundTruthResult.fail(f"Could not fetch any asset data after retries: {error_msg}")
+            return GroundTruthResult.fail("No assets data fetched")
 
         # Find the best performer
         best = max(results, key=lambda x: x["change"])

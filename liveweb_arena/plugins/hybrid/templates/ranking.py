@@ -177,9 +177,13 @@ class HybridRankingTemplate(QuestionTemplate):
             except Exception as e:
                 errors.append(f"{name}: {str(e)}")
 
+        # All assets must have data for fair evaluation
+        if errors:
+            error_msg = "; ".join(errors)
+            return GroundTruthResult.retry(f"Could not fetch all asset data: {error_msg}")
+
         if len(results) < 2:
-            error_msg = "; ".join(errors) if errors else "Insufficient data"
-            return GroundTruthResult.fail(f"Could not fetch enough data after retries: {error_msg}")
+            return GroundTruthResult.fail("Insufficient assets for ranking")
 
         # Sort by change descending
         sorted_results = sorted(results, key=lambda x: x["change"], reverse=True)

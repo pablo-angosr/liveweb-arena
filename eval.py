@@ -3,17 +3,21 @@
 LiveWeb Arena - Standalone Evaluation Script
 
 Usage:
-    python run.py [options]
+    python eval.py [options]
 
 Examples:
     # Basic evaluation (random)
-    python run.py --model "zai-org/GLM-4.7-TEE" --seed 42
+    python eval.py --model "zai-org/GLM-4.7-TEE" --seed 42
 
     # With task_id (deterministic, reproducible question type)
-    python run.py --model "openai/gpt-oss-120b-TEE" --task-id 50001
+    python eval.py --model "openai/gpt-oss-120b-TEE" --task-id 50001
 
     # Show task registry info
-    python run.py --show-registry
+    python eval.py --show-registry
+
+Environment:
+    Copy .env.example to .env and configure your API keys.
+    The script automatically loads .env on startup.
 """
 
 import argparse
@@ -23,6 +27,10 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
+
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
 
 from env import Actor
 from liveweb_arena.utils.logger import set_verbose

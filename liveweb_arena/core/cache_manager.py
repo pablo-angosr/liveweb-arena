@@ -146,9 +146,12 @@ class CacheManager:
 
     def __init__(
         self,
-        cache_dir: str = "cache",
+        cache_dir: str = None,
         configs: Dict[str, CacheConfig] = None,
     ):
+        # Cache directory from environment variable or default
+        if cache_dir is None:
+            cache_dir = os.environ.get("LIVEWEB_CACHE_DIR", "cache")
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 

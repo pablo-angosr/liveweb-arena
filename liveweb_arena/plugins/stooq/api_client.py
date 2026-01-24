@@ -105,6 +105,8 @@ class StooqClient:
                         return None
                     csv_text = await response.text()
 
+            # Normalize line endings (Windows -> Unix)
+            csv_text = csv_text.replace("\r\n", "\n").replace("\r", "\n")
             reader = csv.DictReader(io.StringIO(csv_text))
             rows = list(reader)
 
@@ -185,6 +187,8 @@ class StooqClient:
                         return None
                     csv_text = await response.text()
 
+            # Normalize line endings (Windows -> Unix)
+            csv_text = csv_text.replace("\r\n", "\n").replace("\r", "\n")
             reader = csv.DictReader(io.StringIO(csv_text))
             return list(reader)
 

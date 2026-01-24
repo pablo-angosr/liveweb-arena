@@ -4,9 +4,6 @@ import random
 import re
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
-import aiohttp
-import io
-import csv
 
 from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
@@ -14,6 +11,7 @@ from liveweb_arena.core.validators.base import (
 from liveweb_arena.core.ground_truth_trigger import (
     UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
 )
+from liveweb_arena.plugins.stooq.api_client import StooqClient
 
 
 class ComparisonMetric(Enum):
@@ -273,46 +271,21 @@ Scoring (total 1.0):
 The agent MUST report individual percentage changes for verification."""
 
     async def _fetch_daily_change(self, symbol: str) -> GroundTruthResult:
-        """Fetch daily percentage change for an instrument"""
+        """Fetch daily percentage change for an instrument (via cached StooqClient)"""
         try:
-            async with aiohttp.ClientSession() as session:
-                params = {"s": symbol, "i": "d"}
-                async with session.get(
-                    self.STOOQ_CSV_URL,
-                    params=params,
-                    timeout=aiohttp.ClientTimeout(total=15)
-                ) as response:
-                    if response.status == 404:
-                        return GroundTruthResult.fail(f"Symbol {symbol} not found")
-                    if response.status >= 500:
-                        return GroundTruthResult.retry(f"Server error: HTTP {response.status}")
-                    if response.status != 200:
-                        return GroundTruthResult.fail(f"HTTP {response.status}")
-                    csv_text = await response.text()
+            data = await StooqClient.get_price_data(symbol)
 
-            reader = csv.DictReader(io.StringIO(csv_text))
-            rows = list(reader)
+            if not data:
+                return GroundTruthResult.retry(f"No data for {symbol}")
 
-            if len(rows) < 2:
-                return GroundTruthResult.fail(f"Insufficient data for {symbol}")
+            change_pct = data.get("daily_change_pct")
+            if change_pct is None:
+                return GroundTruthResult.fail(f"Could not get change for {symbol}")
 
-            latest = rows[-1]
-            prev = rows[-2]
+            return GroundTruthResult.ok(change_pct)
 
-            current_close = self._parse_float(latest.get("Close"))
-            prev_close = self._parse_float(prev.get("Close"))
-
-            if current_close is None or prev_close is None or prev_close == 0:
-                return GroundTruthResult.fail(f"Could not parse price data for {symbol}")
-
-            return GroundTruthResult.ok(((current_close - prev_close) / prev_close) * 100)
-
-        except aiohttp.ClientError as e:
-            return GroundTruthResult.retry(f"Network error: {e}")
-        except TimeoutError:
-            return GroundTruthResult.retry("Request timeout")
         except Exception as e:
-            return GroundTruthResult.fail(f"Unexpected error: {e}")
+            return GroundTruthResult.retry(f"Error fetching {symbol}: {e}")
 
     def _parse_float(self, value: Any) -> Optional[float]:
         if value is None:

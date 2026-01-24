@@ -3,9 +3,6 @@
 import random
 from enum import Enum
 from typing import Any, Dict, List, Optional
-import aiohttp
-import io
-import csv
 from datetime import datetime, timedelta
 
 from liveweb_arena.core.validators.base import (
@@ -14,6 +11,7 @@ from liveweb_arena.core.validators.base import (
 from liveweb_arena.core.ground_truth_trigger import (
     UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
 )
+from liveweb_arena.plugins.stooq.api_client import StooqClient
 from .variables import (
     US_STOCKS, INDICES, StockSpec, IndexSpec, InstrumentType,
 )
@@ -167,31 +165,16 @@ class Stooq52WeekTemplate(QuestionTemplate):
 
     async def _fetch_52week_data(self, symbol: str) -> GroundTruthResult:
         """
-        Fetch 52-week data from Stooq CSV.
+        Fetch 52-week data from Stooq (via StooqClient).
 
         Returns GroundTruthResult with dict: current_price, high_52w, low_52w
         """
         try:
-            async with aiohttp.ClientSession() as session:
-                params = {"s": symbol, "i": "d"}
-                async with session.get(
-                    self.STOOQ_CSV_URL,
-                    params=params,
-                    timeout=aiohttp.ClientTimeout(total=15)
-                ) as response:
-                    if response.status == 404:
-                        return GroundTruthResult.fail(f"Symbol {symbol} not found")
-                    if response.status >= 500:
-                        return GroundTruthResult.retry(f"Server error: HTTP {response.status}")
-                    if response.status != 200:
-                        return GroundTruthResult.fail(f"HTTP {response.status}")
-                    csv_text = await response.text()
+            # Use historical data for 52-week calculations
+            rows = await StooqClient.get_historical_data(symbol)
 
-            reader = csv.DictReader(io.StringIO(csv_text))
-            rows = list(reader)
-
-            if len(rows) < 10:
-                return GroundTruthResult.fail(f"Insufficient data: {len(rows)} rows")
+            if not rows or len(rows) < 10:
+                return GroundTruthResult.retry(f"Insufficient data for {symbol}")
 
             # Get last 252 trading days (approximately 1 year)
             year_data = rows[-252:] if len(rows) >= 252 else rows
@@ -208,7 +191,7 @@ class Stooq52WeekTemplate(QuestionTemplate):
                     lows.append(low)
 
             if not highs or not lows:
-                return GroundTruthResult.fail("Could not parse price data from CSV")
+                return GroundTruthResult.fail("Could not parse price data")
 
             # Current price is the last close
             current = self._parse_float(rows[-1].get("Close"))
@@ -221,12 +204,8 @@ class Stooq52WeekTemplate(QuestionTemplate):
                 "low_52w": min(lows),
             })
 
-        except aiohttp.ClientError as e:
-            return GroundTruthResult.retry(f"Network error: {e}")
-        except TimeoutError:
-            return GroundTruthResult.retry("Request timeout")
         except Exception as e:
-            return GroundTruthResult.fail(f"Unexpected error: {e}")
+            return GroundTruthResult.retry(f"Error fetching {symbol}: {e}")
 
     def _parse_float(self, value: Any) -> Optional[float]:
         if value is None:

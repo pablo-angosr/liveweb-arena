@@ -24,6 +24,7 @@ class AssetSpec:
 
 # Asset pool - mixed crypto and traditional finance
 CRYPTO_ASSETS = [
+    # Major cryptocurrencies (all cached in CoinGecko adapter)
     AssetSpec("bitcoin", "Bitcoin", "coingecko", ""),
     AssetSpec("ethereum", "Ethereum", "coingecko", ""),
     AssetSpec("solana", "Solana", "coingecko", ""),
@@ -41,22 +42,28 @@ CRYPTO_ASSETS = [
     AssetSpec("aptos", "Aptos", "coingecko", ""),
     AssetSpec("sui", "Sui", "coingecko", ""),
     AssetSpec("bittensor", "TAO", "coingecko", ""),
+    # Additional cached coins
+    AssetSpec("tether", "Tether", "coingecko", ""),
+    AssetSpec("binancecoin", "BNB", "coingecko", ""),
+    AssetSpec("tron", "TRON", "coingecko", ""),
+    AssetSpec("bitcoin-cash", "Bitcoin Cash", "coingecko", ""),
+    AssetSpec("internet-computer", "Internet Computer", "coingecko", ""),
+    AssetSpec("filecoin", "Filecoin", "coingecko", ""),
+    AssetSpec("hedera", "Hedera", "coingecko", ""),
 ]
 
 TRADITIONAL_ASSETS = [
-    # Commodities
-    AssetSpec("gc.f", "Gold", "stooq", "gc.f"),
-    AssetSpec("si.f", "Silver", "stooq", "si.f"),
-    AssetSpec("cl.f", "Crude Oil", "stooq", "cl.f"),
-    AssetSpec("ng.f", "Natural Gas", "stooq", "ng.f"),
-    AssetSpec("hg.f", "Copper", "stooq", "hg.f"),
+    # Commodities (using forex-style symbols that work on Stooq)
+    AssetSpec("xauusd", "Gold", "stooq", "xauusd"),
+    AssetSpec("xagusd", "Silver", "stooq", "xagusd"),
     # Indices
     AssetSpec("^spx", "S&P 500", "stooq", "^spx"),
     AssetSpec("^dji", "Dow Jones", "stooq", "^dji"),
     AssetSpec("^ndx", "NASDAQ 100", "stooq", "^ndx"),
     AssetSpec("^dax", "DAX", "stooq", "^dax"),
     AssetSpec("^ukx", "FTSE 100", "stooq", "^ukx"),
-    # US Stocks
+    AssetSpec("^nkx", "Nikkei 225", "stooq", "^nkx"),
+    # US Stocks (all cached)
     AssetSpec("aapl.us", "Apple", "stooq", "aapl.us"),
     AssetSpec("msft.us", "Microsoft", "stooq", "msft.us"),
     AssetSpec("nvda.us", "NVIDIA", "stooq", "nvda.us"),
@@ -67,6 +74,8 @@ TRADITIONAL_ASSETS = [
     AssetSpec("jpm.us", "JPMorgan", "stooq", "jpm.us"),
     AssetSpec("v.us", "Visa", "stooq", "v.us"),
     AssetSpec("wmt.us", "Walmart", "stooq", "wmt.us"),
+    AssetSpec("amd.us", "AMD", "stooq", "amd.us"),
+    AssetSpec("coin.us", "Coinbase", "stooq", "coin.us"),
 ]
 
 

@@ -131,8 +131,8 @@ class StooqCacheAdapter:
     CACHED_ASSETS = [
         # Indices
         "^spx", "^dji", "^ndx", "^dax", "^ukx", "^nkx",
-        # Commodities
-        "gc.f", "si.f", "cl.f", "ng.f", "hg.f",
+        # Commodities (using forex-style symbols that work on Stooq)
+        "xauusd", "xagusd",  # Gold, Silver in USD
         # US Stocks
         "aapl.us", "msft.us", "nvda.us", "tsla.us", "googl.us",
         "amzn.us", "meta.us", "jpm.us", "v.us", "wmt.us",
@@ -182,14 +182,15 @@ class StooqCacheAdapter:
 
                         csv_text = await response.text()
 
-                    # Parse CSV
+                    # Parse CSV (handle both Windows and Unix line endings)
+                    csv_text = csv_text.replace("\r\n", "\n").replace("\r", "\n")
                     lines = csv_text.strip().split("\n")
                     if len(lines) < 2:
                         return None
 
                     # Get headers and last row
-                    headers = lines[0].split(",")
-                    last_row = lines[-1].split(",")
+                    headers = [h.strip() for h in lines[0].split(",")]
+                    last_row = [v.strip() for v in lines[-1].split(",")]
 
                     if len(last_row) < len(headers):
                         return None
@@ -201,7 +202,7 @@ class StooqCacheAdapter:
                     daily_change = None
 
                     if len(lines) >= 3:
-                        prev_row = lines[-2].split(",")
+                        prev_row = [v.strip() for v in lines[-2].split(",")]
                         if len(prev_row) >= len(headers):
                             prev_data = dict(zip(headers, prev_row))
                             prev_close = float(prev_data.get("Close", 0))

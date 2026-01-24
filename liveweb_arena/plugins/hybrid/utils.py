@@ -1,21 +1,15 @@
 """Shared utilities for hybrid plugin templates."""
 
 import asyncio
-import csv
-import io
 import logging
-from typing import Any, Callable, Dict, Optional, TypeVar
-
-import aiohttp
+from typing import Any, Callable, Optional, TypeVar
 
 from liveweb_arena.plugins.coingecko.api_client import CoinGeckoClient
+from liveweb_arena.plugins.stooq.api_client import StooqClient
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
-
-# Stooq CSV download URL
-STOOQ_CSV_URL = "https://stooq.com/q/d/l/"
 
 # Thread-local cache context (set during evaluation)
 _cache_context: Optional[Any] = None
@@ -134,7 +128,7 @@ async def get_stooq_price(symbol: str) -> float:
     """
     Get current price from Stooq with retry.
 
-    Uses cache if available, otherwise falls back to live API.
+    Uses StooqClient which handles cache internally.
 
     Args:
         symbol: Stooq symbol
@@ -145,40 +139,12 @@ async def get_stooq_price(symbol: str) -> float:
     Raises:
         RuntimeError: If all retries fail
     """
-    # Try cache first
-    ctx = get_cache_context()
-    if ctx is not None:
-        api_data = ctx.get_api_data("stooq")
-        if api_data:
-            assets = api_data.get("assets", {})
-            asset_data = assets.get(symbol)
-            if asset_data:
-                price = asset_data.get("close")
-                if price is not None:
-                    logger.debug(f"Cache hit: Stooq {symbol} price={price}")
-                    return price
-            logger.debug(f"Cache miss for Stooq {symbol}, falling back to API")
-
-    # Fall back to live API with retry
     async def fetch():
-        async with aiohttp.ClientSession() as session:
-            params = {"s": symbol, "i": "d"}
-            async with session.get(
-                STOOQ_CSV_URL,
-                params=params,
-                timeout=aiohttp.ClientTimeout(total=15)
-            ) as response:
-                if response.status != 200:
-                    raise RuntimeError(f"Stooq returned status {response.status}")
-                csv_text = await response.text()
-
-        reader = csv.DictReader(io.StringIO(csv_text))
-        rows = list(reader)
-
-        if rows:
-            close_val = rows[-1].get("Close")
-            if close_val:
-                return float(close_val)
+        data = await StooqClient.get_price_data(symbol)
+        if data:
+            price = data.get("close")
+            if price is not None:
+                return price
         return None
 
     return await retry_with_backoff(
@@ -193,7 +159,7 @@ async def get_stooq_24h_change(symbol: str) -> float:
     """
     Get daily percentage change from Stooq with retry.
 
-    Uses cache if available, otherwise falls back to live API.
+    Uses StooqClient which handles cache internally.
 
     Args:
         symbol: Stooq symbol
@@ -204,41 +170,12 @@ async def get_stooq_24h_change(symbol: str) -> float:
     Raises:
         RuntimeError: If all retries fail
     """
-    # Try cache first
-    ctx = get_cache_context()
-    if ctx is not None:
-        api_data = ctx.get_api_data("stooq")
-        if api_data:
-            assets = api_data.get("assets", {})
-            asset_data = assets.get(symbol)
-            if asset_data:
-                change = asset_data.get("daily_change_pct")
-                if change is not None:
-                    logger.debug(f"Cache hit: Stooq {symbol} change={change}")
-                    return change
-            logger.debug(f"Cache miss for Stooq {symbol}, falling back to API")
-
-    # Fall back to live API with retry
     async def fetch():
-        async with aiohttp.ClientSession() as session:
-            params = {"s": symbol, "i": "d"}
-            async with session.get(
-                STOOQ_CSV_URL,
-                params=params,
-                timeout=aiohttp.ClientTimeout(total=15)
-            ) as response:
-                if response.status != 200:
-                    raise RuntimeError(f"Stooq returned status {response.status}")
-                csv_text = await response.text()
-
-        reader = csv.DictReader(io.StringIO(csv_text))
-        rows = list(reader)
-
-        if len(rows) >= 2:
-            current = float(rows[-1].get("Close", 0))
-            previous = float(rows[-2].get("Close", 0))
-            if previous > 0:
-                return ((current - previous) / previous) * 100
+        data = await StooqClient.get_price_data(symbol)
+        if data:
+            change = data.get("daily_change_pct")
+            if change is not None:
+                return change
         return None
 
     return await retry_with_backoff(

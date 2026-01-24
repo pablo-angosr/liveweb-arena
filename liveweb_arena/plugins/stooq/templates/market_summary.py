@@ -3,9 +3,6 @@
 import random
 from enum import Enum
 from typing import Any, Dict, List, Optional
-import aiohttp
-import io
-import csv
 
 from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
@@ -13,6 +10,7 @@ from liveweb_arena.core.validators.base import (
 from liveweb_arena.core.ground_truth_trigger import (
     UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
 )
+from liveweb_arena.plugins.stooq.api_client import StooqClient
 from .variables import INDICES, US_STOCKS
 
 
@@ -152,53 +150,25 @@ Key validation points:
 3. Mixed = some up, some down significantly"""
 
     async def _fetch_instrument_data(self, symbol: str) -> GroundTruthResult:
-        """Fetch data for a single instrument"""
+        """Fetch data for a single instrument (via cached StooqClient)"""
         try:
-            async with aiohttp.ClientSession() as session:
-                params = {"s": symbol, "i": "d"}
-                async with session.get(
-                    self.STOOQ_CSV_URL,
-                    params=params,
-                    timeout=aiohttp.ClientTimeout(total=15)
-                ) as response:
-                    if response.status == 404:
-                        return GroundTruthResult.fail(f"Symbol {symbol} not found")
-                    if response.status >= 500:
-                        return GroundTruthResult.retry(f"Server error: HTTP {response.status}")
-                    if response.status != 200:
-                        return GroundTruthResult.fail(f"HTTP {response.status}")
-                    csv_text = await response.text()
+            data = await StooqClient.get_price_data(symbol)
 
-            reader = csv.DictReader(io.StringIO(csv_text))
-            rows = list(reader)
+            if not data:
+                return GroundTruthResult.retry(f"No data for {symbol}")
 
-            if not rows:
-                return GroundTruthResult.fail(f"No data for {symbol}")
-
-            latest = rows[-1]
             result = {
                 "symbol": symbol,
-                "close": self._parse_float(latest.get("Close")),
-                "date": latest.get("Date", ""),
+                "close": data.get("close"),
+                "date": data.get("date", ""),
+                "change": data.get("daily_change"),
+                "change_percent": data.get("daily_change_pct"),
             }
-
-            if len(rows) >= 2:
-                prev = rows[-2]
-                prev_close = self._parse_float(prev.get("Close"))
-                if prev_close and result["close"]:
-                    change = result["close"] - prev_close
-                    change_pct = (change / prev_close) * 100
-                    result["change"] = change
-                    result["change_percent"] = change_pct
 
             return GroundTruthResult.ok(result)
 
-        except aiohttp.ClientError as e:
-            return GroundTruthResult.retry(f"Network error: {e}")
-        except TimeoutError:
-            return GroundTruthResult.retry("Request timeout")
         except Exception as e:
-            return GroundTruthResult.fail(f"Unexpected error: {e}")
+            return GroundTruthResult.retry(f"Error fetching {symbol}: {e}")
 
     def _parse_float(self, value: Any) -> Optional[float]:
         if value is None:

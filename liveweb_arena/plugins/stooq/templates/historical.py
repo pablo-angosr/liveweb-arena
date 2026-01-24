@@ -4,9 +4,6 @@ import random
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
-import aiohttp
-import io
-import csv
 
 from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
@@ -14,6 +11,7 @@ from liveweb_arena.core.validators.base import (
 from liveweb_arena.core.ground_truth_trigger import (
     UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
 )
+from liveweb_arena.plugins.stooq.api_client import StooqClient
 from .variables import (
     StockVariable, IndexVariable, US_STOCKS, INDICES,
     StockSpec, IndexSpec, InstrumentType,
@@ -167,26 +165,11 @@ class StooqHistoricalTemplate(QuestionTemplate):
             return GroundTruthResult.fail("No symbol provided")
 
         try:
-            async with aiohttp.ClientSession() as session:
-                params = {"s": symbol, "i": "d"}
-                async with session.get(
-                    self.STOOQ_CSV_URL,
-                    params=params,
-                    timeout=aiohttp.ClientTimeout(total=15)
-                ) as response:
-                    if response.status == 404:
-                        return GroundTruthResult.fail(f"Symbol {symbol} not found")
-                    if response.status >= 500:
-                        return GroundTruthResult.retry(f"Server error: HTTP {response.status}")
-                    if response.status != 200:
-                        return GroundTruthResult.fail(f"HTTP {response.status}")
-                    csv_text = await response.text()
+            # Use historical data via StooqClient
+            rows = await StooqClient.get_historical_data(symbol)
 
-            reader = csv.DictReader(io.StringIO(csv_text))
-            rows = list(reader)
-
-            if len(rows) < num_days:
-                return GroundTruthResult.fail(f"Insufficient data: need {num_days} days, got {len(rows)}")
+            if not rows or len(rows) < num_days:
+                return GroundTruthResult.retry(f"Insufficient data: need {num_days} days")
 
             recent_data = rows[-num_days:]
             closes = []
@@ -209,12 +192,8 @@ class StooqHistoricalTemplate(QuestionTemplate):
             else:
                 return GroundTruthResult.fail(f"Unknown query type: {query_type}")
 
-        except aiohttp.ClientError as e:
-            return GroundTruthResult.retry(f"Network error: {e}")
-        except TimeoutError:
-            return GroundTruthResult.retry("Request timeout")
         except Exception as e:
-            return GroundTruthResult.fail(f"Unexpected error: {e}")
+            return GroundTruthResult.retry(f"Error fetching {symbol}: {e}")
 
     def _parse_float(self, value: Any) -> Optional[float]:
         if value is None:

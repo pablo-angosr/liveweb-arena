@@ -3,9 +3,6 @@
 import random
 from enum import Enum
 from typing import Any, Dict, List, Optional
-import aiohttp
-import io
-import csv
 
 from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
@@ -13,6 +10,7 @@ from liveweb_arena.core.validators.base import (
 from liveweb_arena.core.ground_truth_trigger import (
     UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
 )
+from liveweb_arena.plugins.stooq.api_client import StooqClient
 from .variables import CURRENCIES, CurrencySpec
 
 
@@ -135,41 +133,20 @@ The agent must:
 3. Provide a clear numeric answer"""
 
     async def _fetch_exchange_rate(self, symbol: str) -> GroundTruthResult:
-        """Fetch current exchange rate from Stooq CSV"""
+        """Fetch current exchange rate from Stooq (via cached StooqClient)"""
         try:
-            async with aiohttp.ClientSession() as session:
-                params = {"s": symbol, "i": "d"}
-                async with session.get(
-                    self.STOOQ_CSV_URL,
-                    params=params,
-                    timeout=aiohttp.ClientTimeout(total=15)
-                ) as response:
-                    if response.status == 404:
-                        return GroundTruthResult.fail(f"Currency pair {symbol} not found")
-                    if response.status >= 500:
-                        return GroundTruthResult.retry(f"Server error: HTTP {response.status}")
-                    if response.status != 200:
-                        return GroundTruthResult.fail(f"HTTP {response.status}")
-                    csv_text = await response.text()
+            data = await StooqClient.get_price_data(symbol)
 
-            reader = csv.DictReader(io.StringIO(csv_text))
-            rows = list(reader)
+            if not data:
+                return GroundTruthResult.retry(f"No data for {symbol}")
 
-            if not rows:
-                return GroundTruthResult.fail(f"No data for {symbol}")
-
-            latest = rows[-1]
-            rate = float(latest.get("Close", 0))
-            if rate <= 0:
+            rate = data.get("close")
+            if not rate or rate <= 0:
                 return GroundTruthResult.fail("Invalid exchange rate")
             return GroundTruthResult.ok(rate)
 
-        except aiohttp.ClientError as e:
-            return GroundTruthResult.retry(f"Network error: {e}")
-        except TimeoutError:
-            return GroundTruthResult.retry("Request timeout")
         except Exception as e:
-            return GroundTruthResult.fail(f"Unexpected error: {e}")
+            return GroundTruthResult.retry(f"Error fetching rate: {e}")
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """

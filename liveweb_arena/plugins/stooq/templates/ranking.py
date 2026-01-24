@@ -3,10 +3,6 @@
 import random
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
-import aiohttp
-import asyncio
-import io
-import csv
 
 from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
@@ -14,6 +10,7 @@ from liveweb_arena.core.validators.base import (
 from liveweb_arena.core.ground_truth_trigger import (
     UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
 )
+from liveweb_arena.plugins.stooq.api_client import StooqClient
 
 
 class RankingMetric(Enum):
@@ -263,28 +260,13 @@ The agent must:
 3. Rank them correctly and identify the {position} {direction}"""
 
     async def _fetch_instrument_data(self, symbol: str) -> GroundTruthResult:
-        """Fetch comprehensive data for a single instrument"""
+        """Fetch comprehensive data for a single instrument (via StooqClient)"""
         try:
-            async with aiohttp.ClientSession() as session:
-                params = {"s": symbol, "i": "d"}
-                async with session.get(
-                    self.STOOQ_CSV_URL,
-                    params=params,
-                    timeout=aiohttp.ClientTimeout(total=15)
-                ) as response:
-                    if response.status == 404:
-                        return GroundTruthResult.fail(f"Symbol {symbol} not found")
-                    if response.status >= 500:
-                        return GroundTruthResult.retry(f"Server error: HTTP {response.status}")
-                    if response.status != 200:
-                        return GroundTruthResult.fail(f"HTTP {response.status}")
-                    csv_text = await response.text()
+            # Use historical data for 52-week calculations
+            rows = await StooqClient.get_historical_data(symbol)
 
-            reader = csv.DictReader(io.StringIO(csv_text))
-            rows = list(reader)
-
-            if len(rows) < 2:
-                return GroundTruthResult.fail(f"Insufficient data for {symbol}")
+            if not rows or len(rows) < 2:
+                return GroundTruthResult.retry(f"Insufficient data for {symbol}")
 
             latest = rows[-1]
             prev = rows[-2]
@@ -328,12 +310,8 @@ The agent must:
                 "distance_from_high": distance_from_high,
             })
 
-        except aiohttp.ClientError as e:
-            return GroundTruthResult.retry(f"Network error: {e}")
-        except TimeoutError:
-            return GroundTruthResult.retry("Request timeout")
         except Exception as e:
-            return GroundTruthResult.fail(f"Unexpected error: {e}")
+            return GroundTruthResult.retry(f"Error fetching {symbol}: {e}")
 
     def _parse_float(self, value: Any) -> Optional[float]:
         if value is None:

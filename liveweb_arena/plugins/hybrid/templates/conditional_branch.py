@@ -36,6 +36,10 @@ CONDITION_ASSETS = [
     AssetSpec("ethereum", "Ethereum", "coingecko", ""),
     AssetSpec("solana", "Solana", "coingecko", ""),
     AssetSpec("dogecoin", "Dogecoin", "coingecko", ""),
+    AssetSpec("cardano", "Cardano", "coingecko", ""),
+    AssetSpec("avalanche-2", "Avalanche", "coingecko", ""),
+    AssetSpec("polkadot", "Polkadot", "coingecko", ""),
+    AssetSpec("sui", "Sui", "coingecko", ""),
 ]
 
 # Target assets for each branch (different domains)
@@ -45,13 +49,18 @@ POSITIVE_TARGETS = [
     AssetSpec("tsla.us", "Tesla", "stooq", "tsla.us"),
     AssetSpec("amd.us", "AMD", "stooq", "amd.us"),
     AssetSpec("coin.us", "Coinbase", "stooq", "coin.us"),
+    AssetSpec("meta.us", "Meta", "stooq", "meta.us"),
+    AssetSpec("amzn.us", "Amazon", "stooq", "amzn.us"),
+    AssetSpec("msft.us", "Microsoft", "stooq", "msft.us"),
 ]
 
 NEGATIVE_TARGETS = [
     # Safe havens - tend to rise when crypto falls
-    AssetSpec("gc.f", "Gold", "stooq", "gc.f"),
-    AssetSpec("si.f", "Silver", "stooq", "si.f"),
+    AssetSpec("xauusd", "Gold", "stooq", "xauusd"),
+    AssetSpec("xagusd", "Silver", "stooq", "xagusd"),
     AssetSpec("tlt.us", "Treasury Bonds ETF", "stooq", "tlt.us"),
+    AssetSpec("jpm.us", "JPMorgan", "stooq", "jpm.us"),
+    AssetSpec("wmt.us", "Walmart", "stooq", "wmt.us"),
 ]
 
 NEUTRAL_TARGETS = [
@@ -59,6 +68,9 @@ NEUTRAL_TARGETS = [
     AssetSpec("^spx", "S&P 500", "stooq", "^spx"),
     AssetSpec("^dji", "Dow Jones", "stooq", "^dji"),
     AssetSpec("^ndx", "NASDAQ 100", "stooq", "^ndx"),
+    AssetSpec("^dax", "DAX", "stooq", "^dax"),
+    AssetSpec("^ukx", "FTSE 100", "stooq", "^ukx"),
+    AssetSpec("^nkx", "Nikkei 225", "stooq", "^nkx"),
 ]
 
 

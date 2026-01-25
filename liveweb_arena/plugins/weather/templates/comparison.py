@@ -2,7 +2,6 @@
 
 import random
 from typing import Any, Dict, List, Optional
-import aiohttp
 
 from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
@@ -11,6 +10,7 @@ from liveweb_arena.core.ground_truth_trigger import (
     UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
 from .variables import LocationVariable, LocationSpec, LocationType
+from ..api_client import WeatherClient
 
 
 # Major city pairs from different climate zones for interesting comparisons
@@ -115,20 +115,15 @@ class WeatherComparisonTemplate(QuestionTemplate):
             return GroundTruthResult.fail("Missing city queries")
 
         try:
-            async with aiohttp.ClientSession() as session:
-                # Fetch city1 temperature
-                url1 = f"https://wttr.in/{city1_query}?format=j1"
-                async with session.get(url1, timeout=aiohttp.ClientTimeout(total=15)) as resp1:
-                    if resp1.status != 200:
-                        return GroundTruthResult.retry(f"HTTP {resp1.status} for {city1_name}")
-                    data1 = await resp1.json()
+            # Fetch city1 temperature
+            data1 = await WeatherClient.get_weather_data(city1_query)
+            if data1 is None:
+                return GroundTruthResult.retry(f"Failed to fetch weather for {city1_name}")
 
-                # Fetch city2 temperature
-                url2 = f"https://wttr.in/{city2_query}?format=j1"
-                async with session.get(url2, timeout=aiohttp.ClientTimeout(total=15)) as resp2:
-                    if resp2.status != 200:
-                        return GroundTruthResult.retry(f"HTTP {resp2.status} for {city2_name}")
-                    data2 = await resp2.json()
+            # Fetch city2 temperature
+            data2 = await WeatherClient.get_weather_data(city2_query)
+            if data2 is None:
+                return GroundTruthResult.retry(f"Failed to fetch weather for {city2_name}")
 
             # Get current temperatures
             temp1 = int(data1.get("current_condition", [{}])[0].get("temp_C", 0))
@@ -141,8 +136,6 @@ class WeatherComparisonTemplate(QuestionTemplate):
             else:
                 return GroundTruthResult.ok(f"Same temperature ({temp1}°C)")
 
-        except aiohttp.ClientError as e:
-            return GroundTruthResult.retry(f"Network error: {e}")
         except Exception as e:
             return GroundTruthResult.retry(f"API error: {e}")
 

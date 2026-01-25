@@ -37,8 +37,8 @@ class CacheConfig:
 DEFAULT_CACHE_CONFIGS: Dict[str, CacheConfig] = {
     "coingecko": CacheConfig(ttl=300, max_versions=3, preload=True),
     "stooq": CacheConfig(ttl=300, max_versions=3, preload=True),
-    "tmdb": CacheConfig(ttl=86400, max_versions=2, preload=False),
-    "weather": CacheConfig(ttl=1800, max_versions=2, preload=False),
+    "tmdb": CacheConfig(ttl=86400, max_versions=2, preload=True),
+    "weather": CacheConfig(ttl=1800, max_versions=2, preload=True),
     "taostats": CacheConfig(ttl=300, max_versions=2, preload=False),
 }
 

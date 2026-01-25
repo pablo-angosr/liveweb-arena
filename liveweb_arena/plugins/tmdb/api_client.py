@@ -1,10 +1,27 @@
-"""TMDB API client with rate limiting and Bearer token auth"""
+"""TMDB API client with rate limiting, Bearer token auth, and caching support"""
 
 import os
 import asyncio
+import logging
 from typing import Any, Dict, Optional
 
 import aiohttp
+
+logger = logging.getLogger(__name__)
+
+# Global cache context reference (set by env.py during evaluation)
+_cache_context: Optional[Any] = None
+
+
+def set_tmdb_cache_context(context: Optional[Any]):
+    """Set the cache context for TMDB API calls."""
+    global _cache_context
+    _cache_context = context
+
+
+def get_tmdb_cache_context() -> Optional[Any]:
+    """Get the current cache context."""
+    return _cache_context
 
 
 class TMDBClient:
@@ -110,6 +127,19 @@ class TMDBClient:
         Returns:
             Movie data dict or None
         """
+        # Try cache first
+        ctx = get_tmdb_cache_context()
+        if ctx is not None:
+            api_data = ctx.get_api_data("tmdb")
+            if api_data:
+                movies = api_data.get("movies", {})
+                movie_data = movies.get(str(movie_id))
+                if movie_data:
+                    logger.debug(f"Cache hit: TMDB movie {movie_id}")
+                    # Return movie info without credits
+                    return {k: v for k, v in movie_data.items() if k != "credits"}
+                logger.debug(f"Cache miss for TMDB movie {movie_id}, falling back to API")
+
         return await cls.get(f"/movie/{movie_id}")
 
     @classmethod
@@ -123,6 +153,18 @@ class TMDBClient:
         Returns:
             Credits data dict or None
         """
+        # Try cache first
+        ctx = get_tmdb_cache_context()
+        if ctx is not None:
+            api_data = ctx.get_api_data("tmdb")
+            if api_data:
+                movies = api_data.get("movies", {})
+                movie_data = movies.get(str(movie_id))
+                if movie_data and "credits" in movie_data:
+                    logger.debug(f"Cache hit: TMDB credits {movie_id}")
+                    return movie_data["credits"]
+                logger.debug(f"Cache miss for TMDB credits {movie_id}, falling back to API")
+
         return await cls.get(f"/movie/{movie_id}/credits")
 
     @classmethod
@@ -136,4 +178,16 @@ class TMDBClient:
         Returns:
             Movie data with credits or None
         """
+        # Try cache first
+        ctx = get_tmdb_cache_context()
+        if ctx is not None:
+            api_data = ctx.get_api_data("tmdb")
+            if api_data:
+                movies = api_data.get("movies", {})
+                movie_data = movies.get(str(movie_id))
+                if movie_data and "credits" in movie_data:
+                    logger.debug(f"Cache hit: TMDB movie+credits {movie_id}")
+                    return movie_data
+                logger.debug(f"Cache miss for TMDB movie+credits {movie_id}, falling back to API")
+
         return await cls.get(f"/movie/{movie_id}", params={"append_to_response": "credits"})

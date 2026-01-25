@@ -256,6 +256,218 @@ class StooqCacheAdapter:
         return api_data.get("assets", {})
 
 
+class WeatherCacheAdapter:
+    """
+    Cache adapter for wttr.in weather data.
+
+    Caches:
+    - Weather data for major world cities
+    - Airport locations
+    """
+
+    SOURCE = "weather"
+    API_BASE = "https://wttr.in"
+
+    # Cities to cache (from weather plugin variables)
+    CACHED_LOCATIONS = [
+        # Asia
+        "Tokyo,Japan", "Beijing,China", "Seoul,South+Korea",
+        "Mumbai,India", "Singapore,Singapore", "Bangkok,Thailand",
+        "Hong+Kong,China", "Shanghai,China", "Delhi,India",
+        "Jakarta,Indonesia", "Manila,Philippines", "Osaka,Japan",
+        # Europe
+        "London,UK", "Paris,France", "Berlin,Germany",
+        "Madrid,Spain", "Rome,Italy", "Amsterdam,Netherlands",
+        "Vienna,Austria", "Prague,Czech+Republic", "Stockholm,Sweden",
+        "Warsaw,Poland", "Brussels,Belgium", "Zurich,Switzerland",
+        # Americas
+        "New+York,USA", "Los+Angeles,USA", "Chicago,USA",
+        "Toronto,Canada", "Mexico+City,Mexico", "Sao+Paulo,Brazil",
+        "Buenos+Aires,Argentina", "Miami,USA", "Seattle,USA",
+        "Vancouver,Canada", "Houston,USA", "Boston,USA",
+        # Oceania
+        "Sydney,Australia", "Melbourne,Australia", "Auckland,New+Zealand",
+        "Brisbane,Australia", "Perth,Australia", "Wellington,New+Zealand",
+        # Africa & Middle East
+        "Dubai,UAE", "Cairo,Egypt", "Johannesburg,South+Africa",
+        "Tel+Aviv,Israel", "Istanbul,Turkey", "Lagos,Nigeria",
+        "Casablanca,Morocco", "Nairobi,Kenya",
+        # Airport codes
+        "JFK", "LAX", "LHR", "CDG", "FRA", "AMS", "DXB", "SIN",
+        "HKG", "NRT", "ICN", "PEK", "SYD", "MEL", "YYZ", "ORD",
+    ]
+
+    def __init__(self, cache_manager: CacheManager = None):
+        self.cache = cache_manager or get_cache_manager()
+        self._register_fetchers()
+
+    def _register_fetchers(self):
+        """Register API fetcher with cache manager."""
+        self.cache.register_fetcher(
+            self.SOURCE,
+            api_fetcher=self._fetch_all_api_data,
+            page_fetcher=None,
+        )
+
+    async def _fetch_all_api_data(self) -> Dict[str, Any]:
+        """Fetch weather data for all cached locations."""
+        logger.info("Fetching weather data for cached locations...")
+
+        result = {
+            "_meta": {
+                "source": "weather",
+                "location_count": 0,
+            },
+            "locations": {},
+        }
+
+        # Semaphore to limit concurrent requests
+        semaphore = asyncio.Semaphore(5)
+
+        async def fetch_one(session: aiohttp.ClientSession, location: str):
+            """Fetch weather data for a single location."""
+            async with semaphore:
+                try:
+                    url = f"{self.API_BASE}/{location}?format=j1"
+                    async with session.get(
+                        url,
+                        timeout=aiohttp.ClientTimeout(total=15),
+                    ) as response:
+                        if response.status != 200:
+                            logger.warning(f"Weather error for {location}: {response.status}")
+                            return None
+                        return await response.json()
+
+                except asyncio.TimeoutError:
+                    logger.warning(f"Weather timeout for {location}")
+                    return None
+                except Exception as e:
+                    logger.warning(f"Failed to fetch weather for {location}: {e}")
+                    return None
+
+        async with aiohttp.ClientSession() as session:
+            tasks = [fetch_one(session, loc) for loc in self.CACHED_LOCATIONS]
+            results = await asyncio.gather(*tasks)
+
+            for location, data in zip(self.CACHED_LOCATIONS, results):
+                if data:
+                    result["locations"][location] = data
+
+        result["_meta"]["location_count"] = len(result["locations"])
+        logger.info(f"Cached weather data for {len(result['locations'])} locations")
+        return result
+
+
+class TMDBCacheAdapter:
+    """
+    Cache adapter for TMDB movie data.
+
+    Caches:
+    - Movie details and credits for template movies
+    """
+
+    SOURCE = "tmdb"
+    API_BASE = "https://api.themoviedb.org/3"
+
+    # Movies to cache (from TMDB plugin variables)
+    CACHED_MOVIES = [
+        # 2020s hits
+        "872585", "569094", "385687", "447365", "502356",
+        "603692", "926393", "667538", "346698", "614930",
+        # 2010s blockbusters
+        "299536", "299534", "27205", "157336", "284053",
+        "284052", "118340", "281957", "68718", "24428",
+        # Classic films
+        "238", "240", "278", "155", "550",
+        "680", "13", "578", "597", "429",
+        # Award winners
+        "496243", "359724", "466272", "497", "389",
+        "122", "120", "121",
+        # Animation
+        "862", "105", "324857", "508947",
+        # International
+        "372058", "129", "311324",
+    ]
+
+    def __init__(self, cache_manager: CacheManager = None):
+        self.cache = cache_manager or get_cache_manager()
+        self._register_fetchers()
+
+    def _register_fetchers(self):
+        """Register API fetcher with cache manager."""
+        self.cache.register_fetcher(
+            self.SOURCE,
+            api_fetcher=self._fetch_all_api_data,
+            page_fetcher=None,
+        )
+
+    def _get_api_key(self) -> Optional[str]:
+        """Get TMDB API key from environment."""
+        import os
+        return os.getenv("TMDB_API_KEY")
+
+    async def _fetch_all_api_data(self) -> Dict[str, Any]:
+        """Fetch movie data for all cached movies."""
+        logger.info("Fetching TMDB movie data...")
+
+        api_key = self._get_api_key()
+        if not api_key:
+            logger.warning("TMDB_API_KEY not set, skipping TMDB cache")
+            return {}
+
+        result = {
+            "_meta": {
+                "source": "tmdb",
+                "movie_count": 0,
+            },
+            "movies": {},
+        }
+
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        }
+
+        # Semaphore to limit concurrent requests
+        semaphore = asyncio.Semaphore(5)
+
+        async def fetch_one(session: aiohttp.ClientSession, movie_id: str):
+            """Fetch movie data with credits."""
+            async with semaphore:
+                try:
+                    url = f"{self.API_BASE}/movie/{movie_id}"
+                    params = {"append_to_response": "credits"}
+                    async with session.get(
+                        url,
+                        params=params,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=15),
+                    ) as response:
+                        if response.status != 200:
+                            logger.warning(f"TMDB error for movie {movie_id}: {response.status}")
+                            return None
+                        return await response.json()
+
+                except asyncio.TimeoutError:
+                    logger.warning(f"TMDB timeout for movie {movie_id}")
+                    return None
+                except Exception as e:
+                    logger.warning(f"Failed to fetch TMDB movie {movie_id}: {e}")
+                    return None
+
+        async with aiohttp.ClientSession() as session:
+            tasks = [fetch_one(session, movie_id) for movie_id in self.CACHED_MOVIES]
+            results = await asyncio.gather(*tasks)
+
+            for movie_id, data in zip(self.CACHED_MOVIES, results):
+                if data:
+                    result["movies"][movie_id] = data
+
+        result["_meta"]["movie_count"] = len(result["movies"])
+        logger.info(f"Cached {len(result['movies'])} movies from TMDB")
+        return result
+
+
 class CacheAdapterRegistry:
     """Registry for all cache adapters."""
 
@@ -275,6 +487,8 @@ class CacheAdapterRegistry:
         """Initialize all default adapters."""
         self.register(CoinGeckoCacheAdapter(self.cache))
         self.register(StooqCacheAdapter(self.cache))
+        self.register(WeatherCacheAdapter(self.cache))
+        self.register(TMDBCacheAdapter(self.cache))
         return self
 
     async def refresh_all(self, sources: List[str] = None):

@@ -3,9 +3,8 @@
 import random
 from typing import Any, Dict, List, Optional
 
-import httpx
-
 from liveweb_arena.core.validators.base import QuestionTemplate, GeneratedQuestion, ValidationResult, register_template
+from ..api_client import WeatherClient
 from liveweb_arena.core.validators.validators import NumericToleranceValidator, BooleanValidator, ExactMatchValidator
 from liveweb_arena.core.ground_truth_trigger import (
     UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
@@ -260,22 +259,10 @@ class LocationNameWeatherTemplate(QuestionTemplate):
         is_boolean = validation_info.get("is_boolean", False)
         unit = validation_info.get("unit", "")
 
-        url = f"https://wttr.in/{location}?format=j1"
-
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(url)
-                if response.status_code == 404:
-                    return GroundTruthResult.fail(f"Location {location} not found")
-                if response.status_code >= 500:
-                    return GroundTruthResult.retry(f"Server error: HTTP {response.status_code}")
-                if response.status_code != 200:
-                    return GroundTruthResult.fail(f"HTTP {response.status_code}")
-                data = response.json()
-        except httpx.TimeoutException:
-            return GroundTruthResult.retry("Request timeout")
-        except httpx.ConnectError as e:
-            return GroundTruthResult.retry(f"Connection error: {e}")
+            data = await WeatherClient.get_weather_data(location)
+            if data is None:
+                return GroundTruthResult.retry(f"Failed to fetch weather for {location}")
         except Exception as e:
             return GroundTruthResult.fail(f"Unexpected error: {e}")
 
@@ -542,22 +529,10 @@ class CurrentWeatherTemplate(QuestionTemplate):
         api_field = validation_info["api_field"]
         unit = validation_info.get("unit", "")
 
-        url = f"https://wttr.in/{location}?format=j1"
-
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(url)
-                if response.status_code == 404:
-                    return GroundTruthResult.fail(f"Location {location} not found")
-                if response.status_code >= 500:
-                    return GroundTruthResult.retry(f"Server error: HTTP {response.status_code}")
-                if response.status_code != 200:
-                    return GroundTruthResult.fail(f"HTTP {response.status_code}")
-                data = response.json()
-        except httpx.TimeoutException:
-            return GroundTruthResult.retry("Request timeout")
-        except httpx.ConnectError as e:
-            return GroundTruthResult.retry(f"Connection error: {e}")
+            data = await WeatherClient.get_weather_data(location)
+            if data is None:
+                return GroundTruthResult.retry(f"Failed to fetch weather for {location}")
         except Exception as e:
             return GroundTruthResult.fail(f"Unexpected error: {e}")
 
@@ -801,22 +776,10 @@ class MultiDayWeatherTemplate(QuestionTemplate):
         is_boolean = validation_info.get("is_boolean", False)
         question_type = validation_info.get("question_type")
 
-        url = f"https://wttr.in/{location}?format=j1"
-
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(url)
-                if response.status_code == 404:
-                    return GroundTruthResult.fail(f"Location {location} not found")
-                if response.status_code >= 500:
-                    return GroundTruthResult.retry(f"Server error: HTTP {response.status_code}")
-                if response.status_code != 200:
-                    return GroundTruthResult.fail(f"HTTP {response.status_code}")
-                data = response.json()
-        except httpx.TimeoutException:
-            return GroundTruthResult.retry("Request timeout")
-        except httpx.ConnectError as e:
-            return GroundTruthResult.retry(f"Connection error: {e}")
+            data = await WeatherClient.get_weather_data(location)
+            if data is None:
+                return GroundTruthResult.retry(f"Failed to fetch weather for {location}")
         except Exception as e:
             return GroundTruthResult.fail(f"Unexpected error: {e}")
 

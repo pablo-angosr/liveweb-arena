@@ -6,11 +6,10 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-import httpx
-
 from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
+from ..api_client import WeatherClient
 from liveweb_arena.core.ground_truth_trigger import (
     UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
 )
@@ -197,13 +196,10 @@ class AstronomyTemplate(QuestionTemplate):
         target_date = validation_info["target_date"]
         api_field = validation_info["api_field"]
 
-        url = f"https://wttr.in/{location}?format=j1"
-
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                data = response.json()
+            data = await WeatherClient.get_weather_data(location)
+            if data is None:
+                return GroundTruthResult.retry(f"Failed to fetch weather for {location}")
 
             weather = data.get("weather", [])
 
@@ -229,10 +225,6 @@ class AstronomyTemplate(QuestionTemplate):
 
             return GroundTruthResult.ok(value)
 
-        except httpx.HTTPStatusError as e:
-            return GroundTruthResult.retry(f"HTTP error: {e.response.status_code}")
-        except httpx.RequestError as e:
-            return GroundTruthResult.retry(f"Network error: {e}")
         except Exception as e:
             return GroundTruthResult.retry(f"API error: {e}")
 

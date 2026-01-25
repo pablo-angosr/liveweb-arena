@@ -26,6 +26,8 @@ from liveweb_arena.plugins.hybrid import HybridPlugin
 from liveweb_arena.plugins.hybrid.utils import set_cache_context
 from liveweb_arena.plugins.coingecko.api_client import set_coingecko_cache_context
 from liveweb_arena.plugins.stooq.api_client import set_stooq_cache_context
+from liveweb_arena.plugins.weather.api_client import set_weather_cache_context
+from liveweb_arena.plugins.tmdb.api_client import set_tmdb_cache_context
 from liveweb_arena.core.validators.llm_validator import validate_answers_with_llm
 from liveweb_arena.utils.llm_client import LLMClient, LLMFatalError
 from liveweb_arena.utils.logger import log
@@ -248,6 +250,8 @@ class Actor:
                     set_cache_context(cache_context)
                     set_coingecko_cache_context(cache_context)
                     set_stooq_cache_context(cache_context)
+                    set_weather_cache_context(cache_context)
+                    set_tmdb_cache_context(cache_context)
                     cached = [s for s, v in cache_context.locked_versions.items() if v]
                     log("Actor", f"Cache context initialized for: {cached}")
                 except Exception as e:
@@ -406,6 +410,8 @@ class Actor:
                 set_cache_context(None)
                 set_coingecko_cache_context(None)
                 set_stooq_cache_context(None)
+                set_weather_cache_context(None)
+                set_tmdb_cache_context(None)
             # Always close the session
             await session.close()
 

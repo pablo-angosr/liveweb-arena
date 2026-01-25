@@ -66,9 +66,6 @@ class TaskRegistry:
         37: ("coingecko", "coingecko_performance"),
 
         # TMDB templates
-        40: ("tmdb", "tmdb_movie_info"),
-        41: ("tmdb", "tmdb_movie_cast"),
-        42: ("tmdb", "tmdb_movie_comparison"),
         43: ("tmdb", "tmdb_movie_crew"),
         44: ("tmdb", "tmdb_person_filmography"),
         45: ("tmdb", "tmdb_movie_collection"),

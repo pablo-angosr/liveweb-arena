@@ -321,10 +321,10 @@ async def fetch_single_asset_data(symbol: str) -> Optional[Dict[str, Any]]:
     if _rate_limited:
         return {}
 
-    # Try symbol variants: as-is, then with .us suffix
+    # Try .us suffix first for bare symbols (canonical form for US stocks)
     variants = [symbol]
     if "." not in symbol and not symbol.startswith("^"):
-        variants.append(f"{symbol}.us")
+        variants = [f"{symbol}.us", symbol]
 
     for sym in variants:
         try:
@@ -346,7 +346,7 @@ async def fetch_single_asset_data(symbol: str) -> Optional[Dict[str, Any]]:
                     if "No data" in text:
                         continue
 
-                    result = _parse_stooq_csv(text, symbol)
+                    result = _parse_stooq_csv(text, sym)
                     if result:
                         return result
 

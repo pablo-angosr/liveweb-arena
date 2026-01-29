@@ -49,11 +49,20 @@ class TaskRegistry:
         12: ("stooq", "stooq_ranking"),
         13: ("stooq", "stooq_sector_analysis"),
         15: ("stooq", "stooq_currency"),
+        16: ("stooq", "stooq_volatility"),
+        17: ("stooq", "stooq_range_position"),
 
         # Taostats templates
         20: ("taostats", "taostats_subnet_info"),
-        21: ("taostats", "taostats_network"),
-        22: ("taostats", "taostats_price"),
+        21: ("taostats", "taostats_comparison"),
+        22: ("taostats", "taostats_analysis"),
+        23: ("taostats", "taostats_ranking"),
+        24: ("taostats", "taostats_price_change"),
+        25: ("taostats", "taostats_threshold"),
+        26: ("taostats", "taostats_multi_condition"),
+        27: ("taostats", "taostats_delta"),
+        28: ("taostats", "taostats_range_count"),
+        29: ("taostats", "taostats_percentage"),
 
         # CoinGecko templates
         30: ("coingecko", "coingecko_price"),

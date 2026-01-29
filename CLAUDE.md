@@ -23,6 +23,7 @@ LiveWeb Arena evaluates LLM browser agents on their ability to navigate real web
 6. **Import Style** - Use absolute imports for cross-package (`liveweb_arena.core.xxx`), relative for same package
 7. **Commit Rules** - Only commit when explicitly asked; keep messages concise
 8. **Template Testing** - Every new template must be tested via `eval.py` with multiple seeds (10-minute timeout)
+9. **No Fallback** - All evaluation logic must be deterministic. Never add fallback/default values to mask errors (e.g., `or 0`, `or "N/A"`, `except: return default`). If data is missing or computation fails, raise the error explicitly so the root cause is exposed.
 
 ## Template Design Guidelines
 

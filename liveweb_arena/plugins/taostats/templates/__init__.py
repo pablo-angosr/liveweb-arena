@@ -1,7 +1,6 @@
 """Taostats question templates"""
 
 from .subnet import SubnetInfoTemplate
-from .network import NetworkTemplate
 from .comparison import ComparisonTemplate
 from .analysis import AnalysisTemplate
 from .ranking import RankingTemplate
@@ -15,7 +14,6 @@ from .variables import SubnetVariable, MetricVariable, SubnetMetric, SubnetSpec,
 
 __all__ = [
     "SubnetInfoTemplate",
-    "NetworkTemplate",
     "ComparisonTemplate",
     "AnalysisTemplate",
     "RankingTemplate",

@@ -7,6 +7,7 @@ from .market_summary import StooqMarketSummaryTemplate
 from .currency import StooqCurrencyTemplate
 from .ranking import StooqRankingTemplate
 from .sector_analysis import StooqSectorAnalysisTemplate
+from .volatility import StooqVolatilityTemplate, StooqRangePositionTemplate
 from .variables import (
     StockVariable, IndexVariable, CurrencyVariable, CommodityVariable,
     PriceMetricVariable, StockSpec, IndexSpec, CurrencySpec, CommoditySpec,
@@ -22,6 +23,8 @@ __all__ = [
     "StooqCurrencyTemplate",
     "StooqRankingTemplate",
     "StooqSectorAnalysisTemplate",
+    "StooqVolatilityTemplate",
+    "StooqRangePositionTemplate",
     "StockVariable",
     "IndexVariable",
     "CurrencyVariable",

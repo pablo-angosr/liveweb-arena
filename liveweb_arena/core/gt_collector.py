@@ -87,6 +87,9 @@ class GTCollector:
         # Collected API data from page visits {asset_id: {field: value}}
         self._collected_api_data: Dict[str, Dict[str, Any]] = {}
 
+        # Page content (accessibility tree) from visits {url: content}
+        self._page_contents: Dict[str, str] = {}
+
     def _get_source_type(self, subtask: "SubTask") -> GTSourceType:
         """Get GT source type for a subtask."""
         if self._task_manager is None:
@@ -119,15 +122,19 @@ class GTCollector:
         api_data: Optional[Dict[str, Any]] = None,
     ):
         """
-        Handle page visit - merge API data from cache.
+        Handle page visit - merge API data from cache and store page content.
 
         Args:
             url: The URL being visited
-            content: Accessibility tree content (not used for GT)
+            content: Accessibility tree content (stored for GT extraction)
             api_data: Page-bound API data from cache
         """
         if not url or url == "about:blank":
             return
+
+        # Store page content for GT extraction
+        if content:
+            self._page_contents[url] = content
 
         # Merge API data and log in one step
         collected_info = self._merge_api_data(url, api_data) if api_data else None
@@ -238,6 +245,10 @@ class GTCollector:
     def get_collected_api_data(self) -> Dict[str, Dict[str, Any]]:
         """Get all collected API data from page visits."""
         return self._collected_api_data
+
+    def get_page_contents(self) -> Dict[str, str]:
+        """Get all page contents (accessibility trees) from visits."""
+        return self._page_contents
 
     async def _fetch_api_gt(self, subtask: "SubTask"):
         """Fetch GT from API for a subtask."""

@@ -45,6 +45,8 @@ class LLMClient:
 
     # Default timeout per request (should be less than total eval timeout)
     DEFAULT_TIMEOUT = 600  # seconds
+    # Maximum chunks to receive (safety limit, ~32k chunks ≈ ~64k tokens)
+    MAX_CHUNKS = 32000
 
     def __init__(self, base_url: str, api_key: str, default_timeout: int = None):
         """
@@ -95,14 +97,24 @@ class LLMClient:
         last_error = None
         for attempt in range(self.MAX_RETRIES):
             try:
-                content, usage = await self._make_request(
-                    messages=messages,
-                    model=model,
-                    temperature=temperature,
-                    seed=seed,
-                    timeout_s=actual_timeout,
+                # Wrap in total timeout to prevent runaway requests
+                content, usage = await asyncio.wait_for(
+                    self._make_request(
+                        messages=messages,
+                        model=model,
+                        temperature=temperature,
+                        seed=seed,
+                        timeout_s=actual_timeout,
+                    ),
+                    timeout=actual_timeout,
                 )
                 return content, usage
+
+            except asyncio.TimeoutError:
+                last_error = TimeoutError(f"LLM request timed out after {actual_timeout}s")
+                log("LLM", f"Total timeout ({actual_timeout}s) exceeded, attempt {attempt + 1}/{self.MAX_RETRIES}")
+                await self._backoff(attempt)
+                continue
 
             except openai.RateLimitError as e:
                 last_error = e
@@ -200,6 +212,12 @@ class LLMClient:
 
         async for chunk in stream:
             chunk_count += 1
+
+            # Safety limit on chunks
+            if chunk_count > self.MAX_CHUNKS:
+                log("LLM", f"Chunk limit exceeded ({self.MAX_CHUNKS}), truncating response")
+                break
+
             if chunk.choices and chunk.choices[0].delta.content:
                 content_parts.append(chunk.choices[0].delta.content)
             if chunk.usage:

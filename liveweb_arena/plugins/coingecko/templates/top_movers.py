@@ -29,20 +29,20 @@ class CoinGeckoTopMoversTemplate(QuestionTemplate):
     - What is the #1 top gainer on CoinGecko right now?
     """
 
-    GT_SOURCE = GTSourceType.API_ONLY  # Requires sorting top 100 coins
+    GT_SOURCE = GTSourceType.API_ONLY  # Requires sorting homepage coins (~39)
 
     GAINER_PATTERNS = [
-        "Among the top 100 cryptocurrencies by market cap, which one gained the most in the last 24 hours?",
-        "What is the biggest 24h gainer among top 100 coins on CoinGecko?",
-        "Find the top performing coin in the last 24 hours from CoinGecko's top 100 by market cap.",
-        "Which top-100 market cap cryptocurrency has the highest 24h gain on CoinGecko?",
+        "Among the major cryptocurrencies on CoinGecko homepage, which one gained the most in the last 24 hours?",
+        "What is the biggest 24h gainer among major coins on CoinGecko?",
+        "Find the top performing cryptocurrency in the last 24 hours from CoinGecko homepage.",
+        "Which major cryptocurrency has the highest 24h gain on CoinGecko?",
     ]
 
     LOSER_PATTERNS = [
-        "Among the top 100 cryptocurrencies by market cap, which one lost the most in the last 24 hours?",
-        "What is the biggest 24h loser among top 100 coins on CoinGecko?",
-        "Find the worst performing coin in the last 24 hours from CoinGecko's top 100 by market cap.",
-        "Which top-100 market cap cryptocurrency has the biggest 24h loss on CoinGecko?",
+        "Among the major cryptocurrencies on CoinGecko homepage, which one lost the most in the last 24 hours?",
+        "What is the biggest 24h loser among major coins on CoinGecko?",
+        "Find the worst performing cryptocurrency in the last 24 hours from CoinGecko homepage.",
+        "Which major cryptocurrency has the biggest 24h loss on CoinGecko?",
     ]
 
     def __init__(self):
@@ -252,7 +252,7 @@ class CoinGeckoTopMoversTemplate(QuestionTemplate):
 
     def get_gt_source(self):
         """
-        Top movers requires sorting 100 coins by 24h change.
+        Top movers requires sorting homepage coins by 24h change.
         Use API_ONLY because we need aggregated market data.
         """
         from liveweb_arena.core.gt_collector import GTSourceType

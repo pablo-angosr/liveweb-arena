@@ -256,10 +256,13 @@ class HybridConditionalBranchTemplate(QuestionTemplate):
                 condition_asset.get("asset_id", "")
             )
         except RuntimeError as e:
-            # RuntimeError means we've exhausted all retries
-            return GroundTruthResult.fail(f"API error after retries: {e}")
+            # RuntimeError: Page not visited - agent capability issue
+            return GroundTruthResult.fail(f"Page not visited: {e}")
+        except ValueError as e:
+            # ValueError: Page visited but data extraction failed - system error
+            return GroundTruthResult.system_error(f"GT extraction failed: {e}")
         except Exception as e:
-            return GroundTruthResult.fail(f"Unexpected error fetching condition: {e}")
+            return GroundTruthResult.system_error(f"Unexpected error: {e}")
 
         # Step 2: Determine branch
         if condition_change > threshold:
@@ -284,10 +287,13 @@ class HybridConditionalBranchTemplate(QuestionTemplate):
                 target_value = await get_stooq_24h_change(target.get("symbol", ""))
                 formatted_value = f"{target_value:+.2f}%"
         except RuntimeError as e:
-            # RuntimeError means we've exhausted all retries
-            return GroundTruthResult.fail(f"API error after retries: {e}")
+            # RuntimeError: Page not visited - agent capability issue
+            return GroundTruthResult.fail(f"Page not visited: {e}")
+        except ValueError as e:
+            # ValueError: Page visited but data extraction failed - system error
+            return GroundTruthResult.system_error(f"GT extraction failed: {e}")
         except Exception as e:
-            return GroundTruthResult.fail(f"Unexpected error fetching target: {e}")
+            return GroundTruthResult.system_error(f"Unexpected error: {e}")
 
         condition_name = condition_asset.get("name", "")
         target_name = target.get("name", "")

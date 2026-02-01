@@ -141,8 +141,9 @@ class SubnetInfoTemplate(QuestionTemplate):
 
         if not subnet_data:
             return GroundTruthResult.fail(
-                f"Subnet {subnet_id} not found in collected data. "
-                f"Available subnets: {list(subnets.keys())[:10]}"
+                f"Agent did not visit Taostats page for subnet {subnet_id}. "
+                f"Required URL: https://www.taostats.io/subnet/{subnet_id} | "
+                f"Visited subnets: {list(subnets.keys())[:5]}"
             )
 
         # Extract requested metric

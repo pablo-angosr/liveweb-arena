@@ -411,7 +411,7 @@ class Actor:
                         "actual": parsed_answers.get(tag),
                         "score": 0.0,
                         "is_correct": False,
-                        "reasoning": f"GT unavailable: {gt_extraction_failures[tag]}",
+                        "reasoning": f"Data not collected: {gt_extraction_failures[tag]}",
                     })
                 else:
                     subtasks_to_validate.append(subtask)

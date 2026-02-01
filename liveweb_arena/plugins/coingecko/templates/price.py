@@ -258,10 +258,11 @@ class CoinGeckoPriceTemplate(QuestionTemplate):
                 coin_data = collected[coin_id]
 
         if coin_data is None:
-            collected_keys = list(collected.keys())[:10] if gt_collector else []
+            collected_keys = list(collected.keys())[:5] if gt_collector else []
             return GroundTruthResult.fail(
-                f"CoinGecko data for '{coin_id}' not collected. "
-                f"Agent must visit the page. Collected: {collected_keys}"
+                f"Agent did not visit CoinGecko page for '{coin_id}'. "
+                f"Required URL: https://www.coingecko.com/en/coins/{coin_id} | "
+                f"Visited: {collected_keys}"
             )
 
         # Extract value based on metric type

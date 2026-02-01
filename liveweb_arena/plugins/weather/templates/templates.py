@@ -286,10 +286,12 @@ class LocationNameWeatherTemplate(QuestionTemplate):
         if data is None:
             # Debug: show what keys are in collected
             collected_keys = list(collected.keys()) if gt_collector else []
+            # Build URL-encoded location for the expected URL
+            url_location = location.replace(" ", "+")
             return GroundTruthResult.fail(
-                f"Weather data for '{location}' not collected. "
-                f"Agent must visit the weather page. "
-                f"Collected keys: {collected_keys[:5]}, tried variants: {variants}"
+                f"Agent did not visit weather page for '{location}'. "
+                f"Required URL: https://wttr.in/{url_location} | "
+                f"Visited: {collected_keys[:5]}"
             )
 
         value = None
@@ -619,7 +621,11 @@ class CurrentWeatherTemplate(QuestionTemplate):
                     break
 
         if data is None:
-            return GroundTruthResult.fail(f"Weather data for '{location}' not collected")
+            url_location = location.replace(" ", "+")
+            return GroundTruthResult.fail(
+                f"Agent did not visit weather page for '{location}'. "
+                f"Required URL: https://wttr.in/{url_location}"
+            )
 
         current = data.get("current_condition", [{}])[0]
         value = current.get(api_field)
@@ -887,7 +893,11 @@ class MultiDayWeatherTemplate(QuestionTemplate):
                     break
 
         if data is None:
-            return GroundTruthResult.fail(f"Weather data for '{location}' not collected")
+            url_location = location.replace(" ", "+")
+            return GroundTruthResult.fail(
+                f"Agent did not visit weather page for '{location}'. "
+                f"Required URL: https://wttr.in/{url_location}"
+            )
 
         weather = data.get("weather", [])
 

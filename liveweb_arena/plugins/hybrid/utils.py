@@ -17,6 +17,16 @@ from liveweb_arena.utils.logger import log, progress, progress_done, is_verbose
 T = TypeVar('T')
 
 
+def _filter_stooq_keys(keys: list) -> list:
+    """Filter keys to show only Stooq symbols (contain '.' like 'aapl.us')."""
+    return [k for k in keys if isinstance(k, str) and '.' in k]
+
+
+def _filter_coingecko_keys(keys: list) -> list:
+    """Filter keys to show only CoinGecko coin IDs (no '.' and not weather locations)."""
+    return [k for k in keys if isinstance(k, str) and '.' not in k and k != 'taostats']
+
+
 async def retry_with_backoff(
     func: Callable[[], T],
     max_retries: int = 10,
@@ -82,13 +92,19 @@ async def get_crypto_24h_change(coin_id: str) -> float:
             if change is not None:
                 log("GT", f"Collected: {coin_id} 24h={change:+.2f}%")
                 return change
+            # Page was visited but data extraction failed - system error
+            raise ValueError(
+                f"GT extraction failed: CoinGecko page for '{coin_id}' was visited but "
+                f"'price_change_percentage_24h' is missing. Data keys: {list(coin_data.keys())}"
+            )
 
         # In cache mode, all data should be collected - if not found, it's an error
         if api_data:
-            collected = list(api_data.keys())
+            coingecko_keys = _filter_coingecko_keys(list(api_data.keys()))
             raise RuntimeError(
-                f"CoinGecko data for '{coin_id}' not in collected data. "
-                f"Available: {collected[:10]}..."
+                f"Agent did not visit CoinGecko page for '{coin_id}'. "
+                f"Required URL: https://www.coingecko.com/en/coins/{coin_id} | "
+                f"Visited CoinGecko: {coingecko_keys[:5] if coingecko_keys else '(none)'}"
             )
 
     # Live mode: no collected data yet, fetch directly from API
@@ -138,12 +154,18 @@ async def get_stooq_price(symbol: str) -> float:
             if price is not None:
                 log("GT", f"Collected: {symbol} price={price}")
                 return price
+            # Page was visited but data extraction failed - system error
+            raise ValueError(
+                f"GT extraction failed: Stooq page for '{symbol}' was visited but 'close' price is missing. "
+                f"Data keys: {list(asset_data.keys())}"
+            )
 
         if api_data:
-            collected = list(api_data.keys())
+            stooq_keys = _filter_stooq_keys(list(api_data.keys()))
             raise RuntimeError(
-                f"Stooq data for '{symbol}' not in collected data. "
-                f"Available: {collected[:10]}..."
+                f"Agent did not visit Stooq page for '{symbol}'. "
+                f"Required URL: https://stooq.com/q/?s={symbol} | "
+                f"Visited Stooq: {stooq_keys[:5] if stooq_keys else '(none)'}"
             )
 
     # Live mode: fetch directly from API
@@ -188,19 +210,31 @@ async def get_stooq_24h_change(symbol: str) -> float:
     if gt_collector is not None:
         api_data = gt_collector.get_collected_api_data()
         # Try both original and lowercase
+        asset_data = None
+        matched_sym = None
         for sym in [symbol, symbol.lower()]:
             if sym in api_data:
                 asset_data = api_data[sym]
-                change = asset_data.get("daily_change_pct")
-                if change is not None:
-                    log("GT", f"Collected: {symbol} 24h={change:+.2f}%")
-                    return change
+                matched_sym = sym
+                break
+
+        if asset_data is not None:
+            change = asset_data.get("daily_change_pct")
+            if change is not None:
+                log("GT", f"Collected: {symbol} 24h={change:+.2f}%")
+                return change
+            # Page was visited but data extraction failed - system error
+            raise ValueError(
+                f"GT extraction failed: Stooq page for '{matched_sym}' was visited but "
+                f"'daily_change_pct' is missing. Data keys: {list(asset_data.keys())}"
+            )
 
         if api_data:
-            collected = list(api_data.keys())
+            stooq_keys = _filter_stooq_keys(list(api_data.keys()))
             raise RuntimeError(
-                f"Stooq data for '{symbol}' not in collected data. "
-                f"Available: {collected[:10]}..."
+                f"Agent did not visit Stooq page for '{symbol}'. "
+                f"Required URL: https://stooq.com/q/?s={symbol} | "
+                f"Visited Stooq: {stooq_keys[:5] if stooq_keys else '(none)'}"
             )
 
     # Live mode: fetch directly from API

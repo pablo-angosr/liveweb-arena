@@ -189,8 +189,9 @@ class StooqPriceTemplate(QuestionTemplate):
         data = collected.get(symbol) or collected.get(symbol.lower())
         if not data:
             return GroundTruthResult.fail(
-                f"Stooq data for '{symbol}' not collected. "
-                f"Available: {list(collected.keys())[:10]}"
+                f"Agent did not visit Stooq page for '{symbol}'. "
+                f"Required URL: https://stooq.com/q/?s={symbol} | "
+                f"Visited: {list(collected.keys())[:5]}"
             )
 
         close = data.get("close")

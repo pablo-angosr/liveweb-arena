@@ -215,25 +215,15 @@ class AgentLoop:
                 max_consecutive = 3
                 log("Agent", f"LLM error ({consecutive_errors}/{max_consecutive}): {type(e).__name__}: {e}", force=True)
 
-                self._trajectory.append(TrajectoryStep(
-                    step_num=step_num,
-                    observation=current_obs,
-                    action=BrowserAction(action_type="wait", params={"seconds": 2}),
-                    action_result="LLM call failed",
-                    prompt=user_prompt,
-                ))
-
                 if consecutive_errors >= max_consecutive:
-                    # Raise fatal error to terminate evaluation immediately
                     raise LLMFatalError(
                         f"LLM errors exhausted after {consecutive_errors} consecutive failures: {type(e).__name__}: {e}",
                         original_error=e,
                         attempts=consecutive_errors,
                     )
 
-                obs = await self._session.execute_action(
-                    BrowserAction(action_type="wait", params={"seconds": 2})
-                )
+                # Brief wait before retry
+                await asyncio.sleep(1)
                 continue
 
             action = self._policy.parse_response(raw_response)

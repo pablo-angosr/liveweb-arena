@@ -132,25 +132,40 @@ The agent must:
 3. Provide a clear numeric answer"""
 
     async def _fetch_exchange_rate(self, symbol: str) -> GroundTruthResult:
-        """Fetch current exchange rate from collected API data (no network fallback)."""
+        """Fetch current exchange rate from collected API data (no network fallback).
+
+        Accepts both directions of currency pair (e.g., audusd or usdaud).
+        """
         from liveweb_arena.core.gt_collector import get_current_gt_collector
         gt_collector = get_current_gt_collector()
         if gt_collector is None:
             return GroundTruthResult.fail("No GT collector")
 
         collected = gt_collector.get_collected_api_data()
-        # Try both original and lowercase
-        data = collected.get(symbol) or collected.get(symbol.lower())
-        if not data:
-            return GroundTruthResult.fail(
-                f"Stooq data for '{symbol}' not collected. "
-                f"Available: {list(collected.keys())[:10]}"
-            )
 
-        rate = data.get("close")
-        if not rate or rate <= 0:
-            return GroundTruthResult.fail("Invalid exchange rate in collected data")
-        return GroundTruthResult.ok(rate)
+        # Try original symbol
+        data = collected.get(symbol) or collected.get(symbol.lower())
+
+        # Try inverse symbol (e.g., audusd -> usdaud)
+        inverse_symbol = symbol[3:] + symbol[:3]  # Swap first 3 and last 3 chars
+        inverse_data = collected.get(inverse_symbol) or collected.get(inverse_symbol.lower())
+
+        if data:
+            rate = data.get("close")
+            if rate and rate > 0:
+                return GroundTruthResult.ok(rate)
+
+        if inverse_data:
+            rate = inverse_data.get("close")
+            if rate and rate > 0:
+                # Invert the rate since we're using the inverse pair
+                return GroundTruthResult.ok(1.0 / rate)
+
+        available = [k for k in collected.keys() if len(k) == 6][:10]
+        return GroundTruthResult.fail(
+            f"Stooq data for '{symbol}' (or '{inverse_symbol}') not collected. "
+            f"Available: {available}"
+        )
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """

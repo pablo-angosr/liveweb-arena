@@ -249,4 +249,7 @@ def initialize_cache():
 
     _subnet_cache = data.get("subnets", {})
     if not _subnet_cache:
-        raise RuntimeError("Failed to initialize taostats subnet cache - API returned no data")
+        if not API_KEY:
+            logger.warning("Taostats cache empty - TAOSTATS_API_KEY not set")
+        else:
+            logger.warning("Taostats cache empty - API returned no data")

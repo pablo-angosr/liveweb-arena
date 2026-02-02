@@ -75,7 +75,7 @@ def _fetch_active_subnet_ids() -> List[int]:
     subnets = get_cached_subnets()
     if not subnets:
         raise RuntimeError(
-            "Subnet data not available. Ensure taostats API is called before generating questions."
+            "Taostats subnet data not available. Set TAOSTATS_API_KEY environment variable."
         )
 
     _subnet_ids_cache = [int(k) for k in subnets.keys() if k != "0"]
@@ -97,7 +97,7 @@ def _fetch_top_subnet_ids(top_n: int = 10) -> List[int]:
     subnets = get_cached_subnets()
     if not subnets:
         raise RuntimeError(
-            "Subnet data not available. Ensure taostats API is called before generating questions."
+            "Taostats subnet data not available. Set TAOSTATS_API_KEY environment variable."
         )
 
     # Sort by emission descending - matches taostats.io default page sort
@@ -130,7 +130,7 @@ def _fetch_subnet_name(subnet_id: int) -> str:
     subnets = get_cached_subnets()
     if not subnets:
         raise RuntimeError(
-            "Subnet data not available. Ensure taostats API is called before generating questions."
+            "Taostats subnet data not available. Set TAOSTATS_API_KEY environment variable."
         )
 
     subnet = subnets.get(str(subnet_id), {})

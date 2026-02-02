@@ -48,7 +48,7 @@ class Actor:
             cache_dir: Cache directory (default: ./cache)
             use_cache: Whether to use cache (True) or live mode (False)
         """
-        self.api_key = api_key or os.getenv("API_KEY")
+        self.api_key = api_key or os.getenv("API_KEY") or os.getenv("CHUTES_API_KEY")
         self.browser: Optional[BrowserEngine] = None
         self.task_manager = TaskManager(get_all_plugins())
         self._semaphore: Optional[asyncio.Semaphore] = None

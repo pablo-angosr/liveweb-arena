@@ -148,7 +148,7 @@ async def main():
     set_verbose(verbose)
 
     # Get API key
-    api_key = args.api_key or os.getenv("API_KEY")
+    api_key = args.api_key or os.getenv("API_KEY") or os.getenv("CHUTES_API_KEY")
     if not api_key:
         print("Error: API key required. Set API_KEY or use --api-key")
         sys.exit(1)

@@ -705,6 +705,10 @@ class BrowserSession:
 
     async def close(self):
         """Close session (context, page, and browser if in strict mode)"""
+        # Clear large content to release memory
+        self._last_full_content = ""
+        self._cache_interceptor = None
+
         try:
             await self._page.close()
         except Exception:

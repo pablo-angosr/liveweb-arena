@@ -188,55 +188,60 @@ class LLMClient:
             max_retries=0,  # We handle retries ourselves
         )
 
-        # Build request parameters
-        params = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "stream": True,
-            "stream_options": {"include_usage": True},
-        }
+        try:
+            # Build request parameters
+            params = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "stream": True,
+                "stream_options": {"include_usage": True},
+            }
 
-        if seed is not None:
-            params["seed"] = seed
+            if seed is not None:
+                params["seed"] = seed
 
-        # Make streaming request
-        start_time = time.time()
-        stream = await client.chat.completions.create(**params)
+            # Make streaming request
+            start_time = time.time()
+            stream = await client.chat.completions.create(**params)
 
-        # Collect streamed content and usage
-        content_parts = []
-        usage = None
-        chunk_count = 0
-        last_progress = 0
+            # Collect streamed content and usage
+            content_parts = []
+            usage = None
+            chunk_count = 0
+            last_progress = 0
 
-        async for chunk in stream:
-            chunk_count += 1
+            async for chunk in stream:
+                chunk_count += 1
 
-            # Safety limit on chunks
-            if chunk_count > self.MAX_CHUNKS:
-                log("LLM", f"Chunk limit exceeded ({self.MAX_CHUNKS}), truncating response")
-                break
+                # Safety limit on chunks
+                if chunk_count > self.MAX_CHUNKS:
+                    log("LLM", f"Chunk limit exceeded ({self.MAX_CHUNKS}), truncating response")
+                    break
 
-            if chunk.choices and chunk.choices[0].delta.content:
-                content_parts.append(chunk.choices[0].delta.content)
-            if chunk.usage:
-                usage = chunk.usage.model_dump()
+                if chunk.choices and chunk.choices[0].delta.content:
+                    content_parts.append(chunk.choices[0].delta.content)
+                if chunk.usage:
+                    usage = chunk.usage.model_dump()
 
-            # Update progress every second
-            elapsed = time.time() - start_time
-            if is_verbose() and elapsed - last_progress >= 1.0:
-                last_progress = elapsed
-                progress("LLM", elapsed, timeout_s, f"chunks:{chunk_count}")
+                # Update progress every second
+                elapsed = time.time() - start_time
+                if is_verbose() and elapsed - last_progress >= 1.0:
+                    last_progress = elapsed
+                    progress("LLM", elapsed, timeout_s, f"chunks:{chunk_count}")
 
-        if is_verbose() and last_progress > 0:
-            progress_done("LLM", f"Done in {time.time()-start_time:.1f}s, {chunk_count} chunks")
+            if is_verbose() and last_progress > 0:
+                progress_done("LLM", f"Done in {time.time()-start_time:.1f}s, {chunk_count} chunks")
 
-        content = "".join(content_parts)
-        if not content:
-            raise ValueError(f"LLM returned empty response after {chunk_count} chunks")
+            content = "".join(content_parts)
+            if not content:
+                raise ValueError(f"LLM returned empty response after {chunk_count} chunks")
 
-        return content.strip(), usage
+            return content.strip(), usage
+        finally:
+            # CRITICAL: Close the client to release HTTP connections
+            # Without this, connections accumulate and eventually exhaust the pool
+            await client.close()
 
     async def _backoff(self, attempt: int):
         """Exponential backoff with jitter"""

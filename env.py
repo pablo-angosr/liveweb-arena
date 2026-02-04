@@ -4,10 +4,12 @@ import asyncio
 import os
 import random
 import time
+import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Type
+from typing import Any, Dict, List, Optional, Set, Type
 
-from liveweb_arena.core.browser import BrowserEngine
+from liveweb_arena.core.browser import BrowserEngine, BrowserSession
 from liveweb_arena.core.task_manager import TaskManager
 from liveweb_arena.core.agent_policy import AgentPolicy
 from liveweb_arena.core.agent_loop import AgentLoop, BrowserFatalError
@@ -15,11 +17,57 @@ from liveweb_arena.core.parser import AnswerParser
 from liveweb_arena.core.gt_collector import GTCollector, GTSourceType, set_current_gt_collector
 from liveweb_arena.core.cache import CacheManager, CachedPage, CacheFatalError, PageRequirement, normalize_url
 from liveweb_arena.core.interceptor import CacheInterceptor
+from liveweb_arena.core.models import BrowserObservation, CompositeTask, TrajectoryStep
 from liveweb_arena.plugins.base import BasePlugin
 from liveweb_arena.plugins import get_plugin, get_all_plugins
 from liveweb_arena.core.validators.llm_validator import validate_answers_with_llm
 from liveweb_arena.utils.llm_client import LLMClient, LLMFatalError
 from liveweb_arena.utils.logger import log
+
+# Import OpenEnvResponse from affinetes
+from affinetes.core.openenv import OpenEnvResponse
+
+
+@dataclass
+class EpisodeState:
+    """Internal state for a training episode."""
+    # Core identifiers
+    episode_id: str
+    task_id: Optional[int]
+    seed: int
+
+    # Task context
+    task: CompositeTask
+    plugins_used: Dict[str, BasePlugin]
+    allowed_domains: Set[str]
+    blocked_patterns: List[str]
+
+    # Browser state
+    session: BrowserSession
+    interceptor: CacheInterceptor
+    cached_pages: Dict[str, CachedPage]
+
+    # GT collection state
+    gt_collector: GTCollector
+
+    # Agent state
+    policy: AgentPolicy
+    system_prompt: str
+
+    # Step tracking
+    current_step: int = 0
+    max_steps: int = 30
+    trajectory: List[TrajectoryStep] = field(default_factory=list)
+
+    # Completion state
+    done: bool = False
+    truncated: bool = False
+    final_answer: Optional[Dict] = None
+    failure_reason: Optional[str] = None
+
+    # Metrics
+    start_time: float = field(default_factory=time.time)
+    last_observation: Optional[BrowserObservation] = None
 
 
 class Actor:
@@ -54,6 +102,9 @@ class Actor:
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._lock = asyncio.Lock()
         self.use_cache = use_cache
+
+        # Episode storage for OpenEnv interface
+        self._episodes: Dict[str, EpisodeState] = {}
 
         # Initialize cache manager
         if cache_dir is None:
@@ -226,26 +277,31 @@ class Actor:
         else:
             log("Actor", "Mode: LIVE (no caching)")
 
-        # Create browser session
-        session = await self.browser.new_session()
-
-        # Set up interceptor
-        interceptor = CacheInterceptor(
-            cached_pages=cached_pages,
-            allowed_domains=allowed_domains,
-            blocked_patterns=blocked_patterns if blocked_patterns else None,
-            cache_manager=self.cache_manager if self.use_cache else None,
-        )
-
-        # Install route handler using session's set_cache_interceptor method
-        if self.use_cache:
-            await session.set_cache_interceptor(interceptor)
-
-        # Block URLs in live mode
-        if not self.use_cache and blocked_patterns:
-            await session.block_urls(blocked_patterns)
+        # Initialize variables for finally block cleanup
+        session = None
+        interceptor = None
+        gt_collector = None
 
         try:
+            # Create browser session
+            session = await self.browser.new_session()
+
+            # Set up interceptor
+            interceptor = CacheInterceptor(
+                cached_pages=cached_pages,
+                allowed_domains=allowed_domains,
+                blocked_patterns=blocked_patterns if blocked_patterns else None,
+                cache_manager=self.cache_manager if self.use_cache else None,
+            )
+
+            # Install route handler using session's set_cache_interceptor method
+            if self.use_cache:
+                await session.set_cache_interceptor(interceptor)
+
+            # Block URLs in live mode
+            if not self.use_cache and blocked_patterns:
+                await session.block_urls(blocked_patterns)
+
             llm_client = LLMClient(base_url=base_url, api_key=api_key)
 
             # Initialize unified GT collector
@@ -439,7 +495,7 @@ class Actor:
             answer_validations = pre_failed_validations.copy()
 
             if subtasks_to_validate:
-                actual_validation_model = validation_model or "openai/gpt-oss-120b-TEE"
+                actual_validation_model = validation_model or "zai-org/GLM-4.7"
                 llm_validations = await validate_answers_with_llm(
                     llm_client=llm_client,
                     subtasks=subtasks_to_validate,
@@ -514,7 +570,15 @@ class Actor:
             return result
 
         finally:
-            await session.close()
+            # Clean up to prevent memory leaks
+            set_current_gt_collector(None)
+            if gt_collector is not None:
+                gt_collector.cleanup()
+            if interceptor is not None:
+                interceptor.cleanup()
+            cached_pages.clear()
+            if session is not None:
+                await session.close()
 
     async def _ensure_browser(self):
         """Ensure browser is started (lazy initialization)."""
@@ -577,3 +641,507 @@ class Actor:
             })
 
         return conversation
+
+    # ========== OpenEnv Interface ==========
+
+    async def reset(
+        self,
+        task_id: Optional[int] = None,
+        seed: Optional[int] = None,
+    ) -> OpenEnvResponse:
+        """
+        Reset environment and start a new episode.
+
+        Args:
+            task_id: Task identifier for deterministic question generation
+            seed: Random seed for variation
+
+        Returns:
+            OpenEnvResponse with initial observation
+        """
+        # Generate seed if not provided
+        seed = seed if seed is not None else random.randint(0, 2**32 - 1)
+
+        # Parse task_id to get templates and config
+        templates = None
+        num_subtasks = 2
+        if task_id is not None:
+            from liveweb_arena.core.task_registry import parse_task_id
+            task_config = parse_task_id(task_id)
+            templates = task_config["templates"]
+            num_subtasks = task_config["num_tasks"]
+            # Use variation_seed from task_id if seed was auto-generated
+            if seed == task_config.get("variation_seed"):
+                pass  # Keep the provided seed
+            log("Actor", f"Reset: task_id={task_id} -> templates={templates}, num_subtasks={num_subtasks}")
+        else:
+            # Generate a task_id from seed for reproducibility
+            task_id = (seed & 0x7FFFFFFF)
+            log("Actor", f"Reset: generated task_id={task_id} from seed={seed}")
+
+        # Ensure browser is started
+        await self._ensure_browser()
+
+        # Generate task
+        task = await self.task_manager.generate_composite_task(
+            seed=seed,
+            num_subtasks=num_subtasks,
+            templates=templates,
+        )
+        log("Actor", f"Generated {len(task.subtasks)} subtasks, seed={seed}")
+
+        # Calculate max_steps from subtasks
+        total_expected_steps = sum(st.expected_steps for st in task.subtasks)
+        max_steps = max(30, total_expected_steps)
+
+        # Collect allowed domains and blocked patterns from plugins
+        allowed_domains: Set[str] = set()
+        blocked_patterns: List[str] = []
+        plugins_used: Dict[str, BasePlugin] = {}
+
+        for subtask in task.subtasks:
+            plugin = self.task_manager.get_plugin(subtask.plugin_name)
+            if plugin:
+                plugins_used[subtask.plugin_name] = plugin
+                if hasattr(plugin, 'allowed_domains'):
+                    allowed_domains.update(plugin.allowed_domains)
+                if hasattr(plugin, 'get_blocked_patterns'):
+                    blocked_patterns.extend(plugin.get_blocked_patterns())
+                elif hasattr(plugin, 'blocked_url_patterns'):
+                    blocked_patterns.extend(plugin.blocked_url_patterns)
+
+        blocked_patterns = list(set(blocked_patterns))
+
+        # Prepare cached pages storage
+        cached_pages: Dict[str, CachedPage] = {}
+
+        # Initialize variables for cleanup on failure
+        session = None
+        interceptor = None
+        gt_collector = None
+        episode_added = False
+
+        try:
+            # Create browser session
+            session = await self.browser.new_session()
+
+            # Set up interceptor
+            interceptor = CacheInterceptor(
+                cached_pages=cached_pages,
+                allowed_domains=allowed_domains,
+                blocked_patterns=blocked_patterns if blocked_patterns else None,
+                cache_manager=self.cache_manager if self.use_cache else None,
+            )
+
+            # Install route handler
+            if self.use_cache:
+                await session.set_cache_interceptor(interceptor)
+
+            # Block URLs in live mode
+            if not self.use_cache and blocked_patterns:
+                await session.block_urls(blocked_patterns)
+
+            # Initialize GT collector
+            gt_collector = GTCollector(
+                subtasks=task.subtasks,
+                task_manager=self.task_manager,
+            )
+            set_current_gt_collector(gt_collector)
+
+            # Build agent policy and system prompt
+            policy = AgentPolicy()
+            system_prompt = policy.build_system_prompt(task)
+
+            # Navigate to about:blank and get initial observation
+            obs = await session.goto("about:blank")
+
+            # Create episode state
+            episode_id = uuid.uuid4().hex
+            episode = EpisodeState(
+                episode_id=episode_id,
+                task_id=task_id,
+                seed=seed,
+                task=task,
+                plugins_used=plugins_used,
+                allowed_domains=allowed_domains,
+                blocked_patterns=blocked_patterns,
+                session=session,
+                interceptor=interceptor,
+                cached_pages=cached_pages,
+                gt_collector=gt_collector,
+                policy=policy,
+                system_prompt=system_prompt,
+                max_steps=max_steps,
+                last_observation=obs,
+            )
+            self._episodes[episode_id] = episode
+            episode_added = True
+
+            # Build observation string (system prompt + initial page state)
+            observation = self._format_observation(episode, obs, is_initial=True)
+
+            return OpenEnvResponse(
+                observation=observation,
+                episode_id=episode_id,
+                info=self._build_info(episode),
+            )
+
+        except Exception:
+            # Clean up resources if episode was not successfully added
+            if not episode_added:
+                set_current_gt_collector(None)
+                if gt_collector is not None:
+                    gt_collector.cleanup()
+                if interceptor is not None:
+                    interceptor.cleanup()
+                cached_pages.clear()
+                if session is not None:
+                    await session.close()
+            raise
+
+    async def step(
+        self,
+        action: str,
+        episode_id: Optional[str] = None,
+    ) -> OpenEnvResponse:
+        """
+        Execute an action in the environment.
+
+        Args:
+            action: The action string (full LLM response including <think> tags)
+            episode_id: Episode identifier
+
+        Returns:
+            OpenEnvResponse with new observation
+        """
+        # Validate episode
+        if not episode_id:
+            return OpenEnvResponse(
+                observation="No episode_id provided. Call reset() first.",
+                done=True,
+                truncated=True,
+                info={"error": {"type": "no_episode_id", "retryable": True}},
+            )
+
+        episode = self._episodes.get(episode_id)
+        if not episode:
+            return OpenEnvResponse(
+                observation=f"Episode {episode_id} not found. Call reset() first.",
+                done=True,
+                truncated=True,
+                info={"error": {"type": "episode_not_found", "retryable": True}},
+            )
+
+        if episode.done:
+            return OpenEnvResponse(
+                observation="Episode already finished. Call reset() to start a new one.",
+                episode_id=episode_id,
+                done=True,
+                info=self._build_info(episode, {"type": "episode_done", "retryable": True}),
+            )
+
+        # Parse the action using agent policy
+        parsed_action = episode.policy.parse_response(action)
+        if parsed_action is None:
+            # Parse failed - record in trajectory but don't terminate
+            episode.current_step += 1
+            step = TrajectoryStep(
+                step_num=episode.current_step - 1,
+                observation=episode.last_observation,
+                action=None,
+                action_result="Parse failed - model output not valid JSON",
+                prompt=self._format_observation(episode, episode.last_observation),
+                raw_response=action,
+            )
+            episode.trajectory.append(step)
+
+            return OpenEnvResponse(
+                observation=f"Action parse failed. Please provide a valid JSON action.\n\n{self._format_observation(episode, episode.last_observation)}",
+                episode_id=episode_id,
+                info=self._build_info(episode, {"type": "action_parse", "retryable": True}),
+            )
+
+        # Handle stop action
+        if parsed_action.action_type == "stop":
+            episode.done = True
+            final_params = parsed_action.params.get("final", {})
+            episode.final_answer = final_params if final_params else parsed_action.params
+
+            step = TrajectoryStep(
+                step_num=episode.current_step,
+                observation=episode.last_observation,
+                action=parsed_action,
+                action_result="Task completed",
+                prompt=self._format_observation(episode, episode.last_observation),
+                raw_response=action,
+            )
+            episode.trajectory.append(step)
+            log("Actor", f"Episode {episode_id[:8]}... completed with stop action")
+
+            return OpenEnvResponse(
+                observation="Task completed. Episode finished.",
+                episode_id=episode_id,
+                reward=0.0,  # Reward computed in validation phase
+                done=True,
+                info=self._build_info(episode),
+            )
+
+        # Execute browser action
+        episode.current_step += 1
+        old_url = episode.last_observation.url if episode.last_observation else None
+
+        try:
+            obs = await episode.session.execute_action(parsed_action)
+            action_result = "Success"
+        except Exception as e:
+            action_result = f"Failed: {e}"
+            obs = await episode.session.get_observation()
+
+        # Fire navigation callback if URL changed (for caching)
+        if obs.url != old_url and obs.url != "about:blank":
+            await self._on_episode_navigation(episode, obs.url)
+
+        # Fire observation callback for GT collection
+        await self._on_episode_observation(episode, obs)
+
+        # Record trajectory step
+        step = TrajectoryStep(
+            step_num=episode.current_step - 1,
+            observation=episode.last_observation,
+            action=parsed_action,
+            action_result=action_result,
+            prompt=self._format_observation(episode, episode.last_observation),
+            raw_response=action,
+        )
+        episode.trajectory.append(step)
+        episode.last_observation = obs
+
+        # Check max steps
+        if episode.current_step >= episode.max_steps:
+            episode.truncated = True
+            episode.done = True
+            episode.failure_reason = "max_steps_reached"
+            log("Actor", f"Episode {episode_id[:8]}... truncated at max_steps={episode.max_steps}")
+
+        # Build new observation
+        observation = self._format_observation(episode, obs)
+
+        return OpenEnvResponse(
+            observation=observation,
+            episode_id=episode_id,
+            done=episode.done,
+            truncated=episode.truncated,
+            info=self._build_info(episode),
+        )
+
+    async def state(self, episode_id: Optional[str] = None) -> OpenEnvResponse:
+        """
+        Get current state without advancing.
+
+        Args:
+            episode_id: Episode identifier
+
+        Returns:
+            OpenEnvResponse with current state
+        """
+        if not episode_id:
+            return OpenEnvResponse(
+                observation="No episode_id provided.",
+                done=True,
+                truncated=True,
+                info={"error": {"type": "no_episode_id"}},
+            )
+
+        episode = self._episodes.get(episode_id)
+        if not episode:
+            return OpenEnvResponse(
+                observation=f"Episode {episode_id} not found.",
+                done=True,
+                truncated=True,
+                info={"error": {"type": "episode_not_found"}},
+            )
+
+        observation = self._format_observation(episode, episode.last_observation)
+
+        return OpenEnvResponse(
+            observation=observation,
+            episode_id=episode_id,
+            done=episode.done,
+            truncated=episode.truncated,
+            info=self._build_info(episode),
+        )
+
+    async def stop(self, episode_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Stop and cleanup an episode.
+
+        Args:
+            episode_id: Episode identifier
+
+        Returns:
+            Dict with cleanup status and final metrics
+        """
+        if not episode_id:
+            return {"status": "ok", "stopped": False, "message": "No episode_id provided"}
+
+        episode = self._episodes.pop(episode_id, None)
+        if not episode:
+            return {"status": "ok", "stopped": False, "episode_id": episode_id}
+
+        # Clean up GT collector reference
+        set_current_gt_collector(None)
+
+        # Gather final metrics before cleanup
+        elapsed = time.time() - episode.start_time
+        interceptor_stats = episode.interceptor.get_stats() if episode.interceptor else {}
+
+        # Clean up memory to prevent leaks
+        if episode.gt_collector:
+            episode.gt_collector.cleanup()
+        if episode.interceptor:
+            episode.interceptor.cleanup()
+        if episode.cached_pages:
+            episode.cached_pages.clear()
+
+        # Close browser session
+        try:
+            await episode.session.close()
+        except Exception as e:
+            log("Actor", f"Error closing session for episode {episode_id[:8]}...: {e}")
+
+        return {
+            "status": "ok",
+            "stopped": True,
+            "episode_id": episode_id,
+            "metrics": {
+                "steps": episode.current_step,
+                "max_steps": episode.max_steps,
+                "elapsed_seconds": elapsed,
+                "done": episode.done,
+                "truncated": episode.truncated,
+                "failure_reason": episode.failure_reason,
+                "final_answer": episode.final_answer,
+                "cache_stats": interceptor_stats,
+            },
+        }
+
+    # ========== OpenEnv Helper Methods ==========
+
+    def _format_observation(
+        self,
+        episode: EpisodeState,
+        obs: BrowserObservation,
+        is_initial: bool = False,
+    ) -> str:
+        """Format observation as a string for the agent."""
+        if is_initial:
+            # Include system prompt for initial observation
+            return f"{episode.system_prompt}\n\n---\n\n{self._format_step_prompt(episode, obs)}"
+        else:
+            return self._format_step_prompt(episode, obs)
+
+    def _format_step_prompt(self, episode: EpisodeState, obs: BrowserObservation) -> str:
+        """Format step prompt with current observation and history."""
+        return episode.policy.build_step_prompt(
+            obs,
+            episode.trajectory,
+            episode.current_step + 1,
+            episode.max_steps,
+        )
+
+    def _build_info(
+        self,
+        episode: Optional[EpisodeState],
+        error: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Build info dict for OpenEnvResponse."""
+        info: Dict[str, Any] = {}
+
+        if episode:
+            info["task_id"] = episode.task_id
+            info["seed"] = episode.seed
+            info["current_step"] = episode.current_step
+            info["max_steps"] = episode.max_steps
+            info["num_subtasks"] = len(episode.task.subtasks)
+            if episode.last_observation:
+                info["current_url"] = episode.last_observation.url
+            if episode.failure_reason:
+                info["failure_reason"] = episode.failure_reason
+            if episode.final_answer:
+                info["final_answer"] = episode.final_answer
+
+        if error:
+            info["error"] = error
+
+        return info
+
+    async def _on_episode_navigation(self, episode: EpisodeState, url: str):
+        """Handle navigation event for caching."""
+        if not self.use_cache:
+            return
+
+        normalized = normalize_url(url)
+        if normalized in episode.cached_pages:
+            return
+
+        # Find plugin for this URL
+        plugin = None
+        for p in episode.plugins_used.values():
+            for domain in p.allowed_domains:
+                if domain in url.lower():
+                    plugin = p
+                    break
+            if plugin:
+                break
+
+        if not plugin:
+            return
+
+        try:
+            # Check if this page needs API data
+            need_api = plugin.needs_api_data(url)
+            page_req = PageRequirement.data(url) if need_api else PageRequirement.nav(url)
+
+            # Fetch and cache the page
+            pages = await self.cache_manager.ensure_cached([page_req], plugin)
+            episode.cached_pages.update(pages)
+            req_type = "data" if need_api else "nav"
+            log("Actor", f"Cached ({req_type}): {url[:55]}...")
+        except CacheFatalError:
+            raise
+        except Exception as e:
+            log("Actor", f"Navigation cache error: {e}")
+
+    async def _on_episode_observation(self, episode: EpisodeState, obs: BrowserObservation):
+        """Handle observation event for GT collection."""
+        if not obs or not obs.url or obs.url == "about:blank":
+            return
+
+        url = obs.url
+        api_data = None
+
+        if self.use_cache:
+            # CACHE mode: use cached api_data
+            normalized = normalize_url(url)
+            cached_page = episode.cached_pages.get(normalized)
+            if cached_page:
+                api_data = cached_page.api_data
+        else:
+            # LIVE mode: fetch api_data from network
+            for p in episode.plugins_used.values():
+                for domain in p.allowed_domains:
+                    if domain in url.lower():
+                        try:
+                            api_data = await p.fetch_api_data(url)
+                        except Exception:
+                            pass
+                        break
+                if api_data:
+                    break
+
+        # Collect GT from this page visit
+        await episode.gt_collector.on_page_visit(
+            url,
+            obs.accessibility_tree,
+            api_data=api_data,
+        )

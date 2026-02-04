@@ -64,7 +64,7 @@ class LLMValidator:
         expected: Any,
         actual: Any,
         task_specific_rules: str = "",
-        model: str = "gpt-4o-mini",
+        model: str = "zai-org/GLM-4.7",
         temperature: float = 0.0,
     ) -> LLMValidationResult:
         """
@@ -184,7 +184,7 @@ async def validate_answers_with_llm(
     answers: dict,
     ground_truths: dict,
     validation_rules: dict = None,
-    model: str = "gpt-4o-mini",
+    model: str = "zai-org/GLM-4.7",
     validation_model: str = None,
     parallel: bool = True,
 ) -> list:

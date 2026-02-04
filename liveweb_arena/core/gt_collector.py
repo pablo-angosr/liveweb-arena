@@ -373,3 +373,18 @@ class GTCollector:
 
         stats["by_source_type"] = {t.value: c for t, c in by_type.items()}
         return stats
+
+    def cleanup(self):
+        """
+        Release memory by clearing internal data structures.
+
+        Call this when the evaluation is complete to prevent memory leaks.
+        The collector should not be used after calling this method.
+        """
+        self._api_results.clear()
+        self._gt_failures.clear()
+        self._visited_urls.clear()
+        self._collected_api_data.clear()
+        self._page_contents.clear()
+        self.subtasks = []
+        self._task_manager = None

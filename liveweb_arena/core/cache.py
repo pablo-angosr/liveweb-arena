@@ -117,7 +117,7 @@ class PageRequirement:
 
 @contextmanager
 def file_lock(lock_path: Path):
-    """Cross-process file lock."""
+    """Cross-process file lock (synchronous, for short operations only)."""
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, 'w') as f:
         fcntl.flock(f.fileno(), fcntl.LOCK_EX)
@@ -125,6 +125,41 @@ def file_lock(lock_path: Path):
             yield
         finally:
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+async def async_file_lock_acquire(lock_path: Path, timeout: float = 60.0) -> int:
+    """
+    Acquire file lock asynchronously (non-blocking with retry).
+
+    Returns file descriptor that must be released with async_file_lock_release().
+
+    This avoids blocking the event loop while waiting for the lock.
+    """
+    import asyncio
+
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    start = time.time()
+
+    while True:
+        fd = open(lock_path, 'w')
+        try:
+            # Try non-blocking lock
+            fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd  # Lock acquired, return file object
+        except BlockingIOError:
+            fd.close()
+            # Lock held by another process, wait and retry
+            if time.time() - start > timeout:
+                raise TimeoutError(f"Could not acquire lock {lock_path} within {timeout}s")
+            await asyncio.sleep(0.1)  # Yield to event loop
+
+
+def async_file_lock_release(fd):
+    """Release file lock acquired by async_file_lock_acquire()."""
+    try:
+        fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
+    finally:
+        fd.close()
 
 
 def safe_path_component(s: str) -> str:
@@ -291,8 +326,9 @@ class CacheManager:
             log("Cache", f"HIT {page_type} - {url_display(normalized)}")
             return cached
 
-        # 2. Need update, acquire lock
-        with file_lock(lock_file):
+        # 2. Need update, acquire async lock (non-blocking to avoid deadlock)
+        lock_fd = await async_file_lock_acquire(lock_file)
+        try:
             # 3. Double check (another process may have updated)
             cached = self._load_if_valid(cache_file, need_api)
             if cached:
@@ -342,6 +378,8 @@ class CacheManager:
             elapsed = time.time() - start
             log("Cache", f"SAVED {page_type} - {url_display(normalized)} ({elapsed:.1f}s)")
             return cached
+        finally:
+            async_file_lock_release(lock_fd)
 
     def _load_if_valid(self, cache_file: Path, need_api: bool) -> Optional[CachedPage]:
         """Load cache if valid."""

@@ -131,9 +131,9 @@ class AgentLoop:
         consecutive_error_pages = 0
         max_error_page_retries = 10  # Prevent infinite loops on persistent network issues
 
-        effective_step = 0  # Only count steps on valid pages
-        iteration = 0  # Total iterations including error page handling
-        last_goto_url = None  # Track last navigation URL for retry
+        effective_step = 0  # Count all steps including error pages (AI sees them)
+        iteration = 0  # Total iterations (safety limit)
+        last_goto_url = None  # Track last navigation URL for error context
 
         while effective_step < self._max_steps:
             iteration += 1
@@ -142,43 +142,24 @@ class AgentLoop:
                 log("Agent", "Too many iterations, breaking loop", force=True)
                 break
 
-            # Check if we're on an error page
+            # Check if we're on an error page - let AI see it and decide what to do
             if is_error_page(obs.url):
                 consecutive_error_pages += 1
-                log("Agent", f"Error page detected ({consecutive_error_pages}/{max_error_page_retries}): {obs.url[:50]}")
+                log("Agent", f"Error page detected (visible to AI): {obs.url[:50]}")
 
+                # Safety limit: if AI keeps landing on error pages, eventually stop
                 if consecutive_error_pages >= max_error_page_retries:
-                    log("Agent", "Max error page retries reached", force=True)
+                    log("Agent", f"Too many consecutive error pages ({consecutive_error_pages}), AI unable to navigate", force=True)
                     raise BrowserFatalError(
-                        f"Browser navigation failed after {consecutive_error_pages} retries: {obs.url}",
+                        f"AI unable to navigate after {consecutive_error_pages} consecutive error pages",
                         url=last_goto_url,
                         attempts=consecutive_error_pages,
                     )
+                # Error pages count as a step - AI will see it and can take corrective action
+            else:
+                # Reset error page counter on valid page
+                consecutive_error_pages = 0
 
-                # Wait with backoff before retrying (don't count as a step)
-                wait_time = min(2 * consecutive_error_pages, 10)
-                await asyncio.sleep(wait_time)
-
-                # If we have a last goto URL, retry navigation automatically
-                if last_goto_url:
-                    log("Agent", f"Retrying navigation to: {last_goto_url[:50]}")
-                    old_url = obs.url
-                    obs = await self._session.goto(last_goto_url)
-                    # Fire navigation callback if retry succeeded (URL changed from error page)
-                    if self._on_navigation and obs.url != old_url and not is_error_page(obs.url):
-                        try:
-                            await self._on_navigation(obs.url)
-                        except CacheFatalError:
-                            raise  # Cache failure = browser can't load = terminate immediately
-                        except Exception as e:
-                            log("Agent", f"Navigation callback error: {e}")
-                else:
-                    # Get fresh observation after waiting
-                    obs = await self._session.get_observation()
-                continue
-
-            # Reset error page counter on valid page
-            consecutive_error_pages = 0
             effective_step += 1
             log("")  # Blank line between steps
             log("Agent", f"Step {effective_step}/{self._max_steps}, url={obs.url[:50]}")

@@ -5,6 +5,8 @@ import os
 from typing import Any, Dict, List, Optional
 import aiohttp
 
+from liveweb_arena.plugins.base_client import APIFetchError
+
 logger = logging.getLogger(__name__)
 
 # Cache source name
@@ -12,13 +14,17 @@ CACHE_SOURCE = "taostats"
 
 # API configuration
 API_BASE_URL = "https://api.taostats.io/api"
-API_KEY = os.environ.get("TAOSTATS_API_KEY", "")
+
+
+def _get_api_key() -> str:
+    """Get API key from environment at runtime."""
+    return os.environ.get("TAOSTATS_API_KEY", "")
 
 
 def _get_headers() -> Dict[str, str]:
     """Get API request headers."""
     return {
-        "Authorization": API_KEY,
+        "Authorization": _get_api_key(),
         "Content-Type": "application/json",
     }
 
@@ -35,9 +41,9 @@ async def fetch_all_subnets() -> Dict[str, Any]:
             }
         }
     """
-    if not API_KEY:
-        logger.warning("TAOSTATS_API_KEY not set")
-        return {"subnets": {}}
+    api_key = _get_api_key()
+    if not api_key:
+        raise APIFetchError("TAOSTATS_API_KEY environment variable not set", source="taostats")
 
     subnets = {}
 
@@ -50,8 +56,12 @@ async def fetch_all_subnets() -> Dict[str, Any]:
                 params={"limit": 200}
             ) as resp:
                 if resp.status != 200:
-                    logger.error(f"Pool API error: {resp.status}")
-                    return {"subnets": {}}
+                    body = await resp.text()
+                    raise APIFetchError(
+                        f"status={resp.status}, body={body[:500]}",
+                        source="taostats",
+                        status_code=resp.status,
+                    )
 
                 pool_data = await resp.json()
 
@@ -94,9 +104,10 @@ async def fetch_all_subnets() -> Dict[str, Any]:
                             subnets[netuid]["owner"] = subnet.get("owner", {}).get("ss58", "")
                             subnets[netuid]["emission"] = subnet.get("emission", 0)
 
+    except APIFetchError:
+        raise  # Already a proper error, propagate as-is
     except Exception as e:
-        logger.error(f"Failed to fetch subnets: {e}")
-        return {"subnets": {}}
+        raise APIFetchError(f"Unexpected error: {e}", source="taostats") from e
 
     return {"subnets": subnets}
 
@@ -111,9 +122,9 @@ async def fetch_single_subnet_data(subnet_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Dict with subnet data, or empty dict on error
     """
-    if not API_KEY:
-        logger.warning("TAOSTATS_API_KEY not set")
-        return {}
+    api_key = _get_api_key()
+    if not api_key:
+        raise APIFetchError("TAOSTATS_API_KEY environment variable not set", source="taostats")
 
     try:
         result = {"netuid": int(subnet_id)}
@@ -152,9 +163,10 @@ async def fetch_single_subnet_data(subnet_id: str) -> Optional[Dict[str, Any]]:
 
             return result if len(result) > 1 else {}
 
+    except APIFetchError:
+        raise
     except Exception as e:
-        logger.error(f"Failed to fetch subnet {subnet_id}: {e}")
-        return {}
+        raise APIFetchError(f"Failed to fetch subnet {subnet_id}: {e}", source="taostats") from e
 
 
 async def fetch_homepage_api_data() -> Dict[str, Any]:
@@ -232,6 +244,10 @@ def initialize_cache():
     if _subnet_cache is not None:
         return  # Already initialized
 
+    # Check API key before attempting to fetch
+    if not _get_api_key():
+        raise APIFetchError("TAOSTATS_API_KEY environment variable not set", source="taostats")
+
     try:
         # Try to get existing event loop
         loop = asyncio.get_event_loop()
@@ -243,13 +259,15 @@ def initialize_cache():
                 data = future.result(timeout=60)
         else:
             data = loop.run_until_complete(fetch_all_subnets())
-    except RuntimeError:
-        # No event loop exists, create one
-        data = asyncio.run(fetch_all_subnets())
+    except APIFetchError:
+        raise  # API errors propagate directly
+    except RuntimeError as e:
+        # Only handle "no event loop" errors, re-raise others
+        if "no current event loop" in str(e).lower() or "no running event loop" in str(e).lower():
+            data = asyncio.run(fetch_all_subnets())
+        else:
+            raise
 
     _subnet_cache = data.get("subnets", {})
     if not _subnet_cache:
-        if not API_KEY:
-            logger.warning("Taostats cache empty - TAOSTATS_API_KEY not set")
-        else:
-            logger.warning("Taostats cache empty - API returned no data")
+        raise APIFetchError("API returned no subnet data", source="taostats")

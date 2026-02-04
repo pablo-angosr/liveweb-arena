@@ -207,8 +207,7 @@ class Actor:
                         "num_subtasks": num_subtasks,
                         "conversation": [],
                     },
-                    "error": f"{type(e).__name__}: {str(e)}",
-                    "error_trace": traceback.format_exc(),
+                    "error": traceback.format_exc(),
                 }
 
         result["time_taken"] = time.time() - start_time
@@ -366,10 +365,21 @@ class Actor:
                             for p in plugins_used.values():
                                 for domain in p.allowed_domains:
                                     if domain in url.lower():
-                                        try:
-                                            api_data = await p.fetch_api_data(url)
-                                        except Exception:
-                                            pass
+                                        need_api = p.needs_api_data(url)
+                                        if need_api:
+                                            # Data page: API fetch must succeed
+                                            try:
+                                                api_data = await p.fetch_api_data(url)
+                                            except Exception as e:
+                                                raise CacheFatalError(
+                                                    f"LIVE mode API fetch failed (GT invalid): {e}",
+                                                    url=url,
+                                                )
+                                            if not api_data:
+                                                raise CacheFatalError(
+                                                    f"LIVE mode API returned empty data (GT invalid)",
+                                                    url=url,
+                                                )
                                         break
                                 if api_data:
                                     break
@@ -398,9 +408,9 @@ class Actor:
             failure_reason = None
             error_message = None
 
+            # Fatal errors that invalidate evaluation (system issues, not agent capability)
             _FATAL_ERROR_MAP = {
                 LLMFatalError: "llm_error",
-                BrowserFatalError: "browser_error",
                 CacheFatalError: "cache_error",
             }
 
@@ -419,7 +429,12 @@ class Actor:
                 failure_reason = "agent_timeout"
                 error_message = f"Agent timeout after {timeout}s"
                 log("Actor", error_message, force=True)
-            except (LLMFatalError, BrowserFatalError, CacheFatalError) as e:
+            except BrowserFatalError as e:
+                # Browser navigation failure = agent capability issue (e.g., invalid URL)
+                # Valid evaluation with score=0, not a system error
+                failure_reason = "browser_error"
+                log("Actor", f"Browser error (agent issue): {e}", force=True)
+            except (LLMFatalError, CacheFatalError) as e:
                 failure_reason = _FATAL_ERROR_MAP[type(e)]
                 error_message = f"{failure_reason}: {e}"
                 log("Actor", f"Fatal error - {error_message}", force=True)
@@ -1131,10 +1146,21 @@ class Actor:
             for p in episode.plugins_used.values():
                 for domain in p.allowed_domains:
                     if domain in url.lower():
-                        try:
-                            api_data = await p.fetch_api_data(url)
-                        except Exception:
-                            pass
+                        need_api = p.needs_api_data(url)
+                        if need_api:
+                            # Data page: API fetch must succeed
+                            try:
+                                api_data = await p.fetch_api_data(url)
+                            except Exception as e:
+                                raise CacheFatalError(
+                                    f"LIVE mode API fetch failed (GT invalid): {e}",
+                                    url=url,
+                                )
+                            if not api_data:
+                                raise CacheFatalError(
+                                    f"LIVE mode API returned empty data (GT invalid)",
+                                    url=url,
+                                )
                         break
                 if api_data:
                     break

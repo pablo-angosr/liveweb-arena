@@ -100,13 +100,14 @@ class TaostatsPlugin(BasePlugin):
 
         Examples:
             https://taostats.io/subnets/27 -> 27
+            https://taostats.io/subnets/netuid-27/ -> 27
             https://taostats.io/subnets/1 -> 1
         """
         parsed = urlparse(url)
         path = parsed.path
 
-        # Pattern: /subnets/{subnet_id}
-        match = re.search(r'/subnets/(\d+)', path)
+        # Pattern: /subnets/{subnet_id} or /subnets/netuid-{subnet_id}
+        match = re.search(r'/subnets/(?:netuid-)?(\d+)', path)
         if match:
             return match.group(1)
 

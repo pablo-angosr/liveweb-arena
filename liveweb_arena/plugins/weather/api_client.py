@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 import aiohttp
 import httpx
 
-from liveweb_arena.plugins.base_client import BaseAPIClient, RateLimiter
+from liveweb_arena.plugins.base_client import APIFetchError, BaseAPIClient, RateLimiter, validate_api_response
 from liveweb_arena.utils.logger import log
 
 logger = logging.getLogger(__name__)
@@ -142,7 +142,7 @@ async def fetch_cache_api_data() -> Optional[Dict[str, Any]]:
     return result
 
 
-async def fetch_single_location_data(location: str) -> Optional[Dict[str, Any]]:
+async def fetch_single_location_data(location: str) -> Dict[str, Any]:
     """
     Fetch weather data for a single location.
 
@@ -152,7 +152,10 @@ async def fetch_single_location_data(location: str) -> Optional[Dict[str, Any]]:
         location: Location query (e.g., "Tokyo,Japan", "JFK")
 
     Returns:
-        Dict with weather JSON data, or empty dict on error
+        Dict with weather JSON data
+
+    Raises:
+        APIFetchError: If API request fails or returns invalid data
     """
     try:
         async with aiohttp.ClientSession() as session:
@@ -163,9 +166,16 @@ async def fetch_single_location_data(location: str) -> Optional[Dict[str, Any]]:
                 headers={"User-Agent": "curl/7.64.1"},
             ) as response:
                 if response.status != 200:
-                    logger.warning(f"Weather error for {location}: {response.status}")
-                    return {}
-                return await response.json()
+                    raise APIFetchError(
+                        f"status={response.status} for location={location}",
+                        source="weather",
+                        status_code=response.status,
+                    )
+                data = await response.json()
+                validate_api_response(data, dict, f"location={location}")
+                return data
 
-    except Exception:
-        return {}
+    except APIFetchError:
+        raise
+    except Exception as e:
+        raise APIFetchError(f"Unexpected error for {location}: {e}", source="weather") from e

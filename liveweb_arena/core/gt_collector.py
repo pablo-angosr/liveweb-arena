@@ -166,6 +166,10 @@ class GTCollector:
         Returns:
             Description of what was collected, or None
         """
+        # Validate api_data type - must be dict, never silently ignore bad data
+        if not isinstance(api_data, dict):
+            raise TypeError(f"api_data is {type(api_data).__name__}, expected dict for {url[:80]}")
+
         url_lower = url.lower()
 
         if "coingecko.com" in url_lower:

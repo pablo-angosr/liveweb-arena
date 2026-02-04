@@ -3,7 +3,37 @@
 import asyncio
 import time
 from abc import ABC
-from typing import ClassVar
+from typing import Any, ClassVar, Dict
+
+
+class APIFetchError(Exception):
+    """
+    Raised when API data fetch fails.
+
+    This is a GT-critical error - evaluation cannot proceed without valid data.
+    All API clients should raise this instead of returning None/empty dict.
+    """
+
+    def __init__(self, message: str, source: str = None, status_code: int = None):
+        super().__init__(message)
+        self.source = source
+        self.status_code = status_code
+
+
+def validate_api_response(data: Any, expected_type: type, context: str) -> None:
+    """
+    Validate API response type. Raises APIFetchError if invalid.
+
+    Args:
+        data: The response data to validate
+        expected_type: Expected Python type (dict, list, etc.)
+        context: Description for error message (e.g., "coin_id=bitcoin")
+    """
+    if not isinstance(data, expected_type):
+        raise APIFetchError(
+            f"API returned {type(data).__name__}, expected {expected_type.__name__} for {context}",
+            source="validation",
+        )
 
 
 class RateLimiter:

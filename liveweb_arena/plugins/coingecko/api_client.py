@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 
-from liveweb_arena.plugins.base_client import BaseAPIClient, RateLimiter
+from liveweb_arena.plugins.base_client import APIFetchError, BaseAPIClient, RateLimiter, validate_api_response
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +241,7 @@ async def fetch_homepage_api_data() -> Dict[str, Any]:
     return {"coins": {}}
 
 
-async def fetch_single_coin_data(coin_id: str) -> Optional[Dict[str, Any]]:
+async def fetch_single_coin_data(coin_id: str) -> Dict[str, Any]:
     """
     Fetch market data for a single coin.
 
@@ -251,7 +251,10 @@ async def fetch_single_coin_data(coin_id: str) -> Optional[Dict[str, Any]]:
         coin_id: CoinGecko coin ID (e.g., "bitcoin", "ethereum")
 
     Returns:
-        Dict with coin market data, or empty dict on error
+        Dict with coin market data
+
+    Raises:
+        APIFetchError: If API request fails or returns invalid data
     """
     try:
         async with aiohttp.ClientSession() as session:
@@ -268,7 +271,6 @@ async def fetch_single_coin_data(coin_id: str) -> Optional[Dict[str, Any]]:
                 "price_change_percentage": "24h,7d,30d",
             }
 
-            # Rate limit
             await CoinGeckoClient._rate_limit()
 
             async with session.get(
@@ -278,16 +280,21 @@ async def fetch_single_coin_data(coin_id: str) -> Optional[Dict[str, Any]]:
                 timeout=aiohttp.ClientTimeout(total=30),
             ) as response:
                 if response.status != 200:
-                    logger.warning(f"CoinGecko API error for {coin_id}: {response.status}")
-                    return {}
+                    raise APIFetchError(
+                        f"status={response.status} for coin_id={coin_id}",
+                        source="coingecko",
+                        status_code=response.status,
+                    )
                 data = await response.json()
 
         if not data:
-            return {}
+            raise APIFetchError(f"Empty response for coin_id={coin_id}", source="coingecko")
 
-        # Return the single coin's data
-        return data[0] if data else {}
+        validate_api_response(data, list, f"coin_id={coin_id}")
+        validate_api_response(data[0], dict, f"coin_id={coin_id} first element")
+        return data[0]
 
+    except APIFetchError:
+        raise
     except Exception as e:
-        logger.error(f"CoinGecko fetch failed for {coin_id}: {e}")
-        return {}
+        raise APIFetchError(f"Unexpected error for {coin_id}: {e}", source="coingecko") from e

@@ -165,6 +165,10 @@ class BrowserSession:
         self._view_offset = 0
         self._last_full_content = ""
 
+        # Ensure URL has protocol prefix
+        if url and not url.startswith(("http://", "https://", "about:")):
+            url = "https://" + url
+
         for attempt in range(max_retries):
             try:
                 await self._page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
@@ -190,6 +194,9 @@ class BrowserSession:
         try:
             if action_type == "goto":
                 url = params.get("url", "")
+                # Ensure URL has protocol prefix
+                if url and not url.startswith(("http://", "https://", "about:")):
+                    url = "https://" + url
                 # Retry navigation if it fails (chrome-error://)
                 for nav_attempt in range(max_nav_retries):
                     await self._page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)

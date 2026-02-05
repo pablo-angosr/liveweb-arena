@@ -1,7 +1,7 @@
-"""Taostats API client using official taostats.io API"""
+"""Taostats API client using TaoMarketCap Internal API (no rate limiting, no API key)"""
 
 import logging
-import os
+import asyncio
 from typing import Any, Dict, List, Optional
 import aiohttp
 
@@ -12,26 +12,73 @@ logger = logging.getLogger(__name__)
 # Cache source name
 CACHE_SOURCE = "taostats"
 
-# API configuration
-API_BASE_URL = "https://api.taostats.io/api"
+# TaoMarketCap Internal API - no API key required, no rate limiting
+API_BASE_URL = "https://api.taomarketcap.com/internal/v1"
+
+# Conversion factor: rao to TAO (1 TAO = 1e9 rao)
+RAO_TO_TAO = 1e9
 
 
-def _get_api_key() -> str:
-    """Get API key from environment at runtime."""
-    return os.environ.get("TAOSTATS_API_KEY", "")
+def _parse_subnet_data(subnet: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Parse subnet data from TaoMarketCap Internal API format.
 
+    Args:
+        subnet: Raw subnet data from API
 
-def _get_headers() -> Dict[str, str]:
-    """Get API request headers."""
+    Returns:
+        Normalized subnet data dict
+    """
+    netuid = subnet.get("netuid", 0)
+    snapshot = subnet.get("latest_snapshot") or {}
+    identities = snapshot.get("subnet_identities_v3") or {}
+    dtao = snapshot.get("dtao") or {}
+
+    # Get name from identities or fall back to symbol
+    name = identities.get("subnetName", "") or snapshot.get("token_symbol", f"SN{netuid}")
+
+    # Convert rao values to TAO
+    subnet_tao = float(snapshot.get("subnet_tao", 0) or 0) / RAO_TO_TAO
+    alpha_in = float(snapshot.get("subnet_alpha_in", 0) or 0) / RAO_TO_TAO
+    volume = float(snapshot.get("subnet_volume", 0) or 0) / RAO_TO_TAO
+    emission = float(snapshot.get("subnet_tao_in_emission", 0) or 0) / RAO_TO_TAO
+
+    # Liquidity from dtao
+    liquidity = float(dtao.get("taoLiquidity", 0) or 0) / RAO_TO_TAO
+
+    # Price is already in TAO units
+    price = float(snapshot.get("price", 0) or 0)
+
+    # Calculate market cap (price * total alpha supply)
+    alpha_out = float(snapshot.get("subnet_alpha_out", 0) or 0) / RAO_TO_TAO
+    market_cap = price * alpha_out if price and alpha_out else 0
+
     return {
-        "Authorization": _get_api_key(),
-        "Content-Type": "application/json",
+        "netuid": int(netuid),
+        "name": name,
+        "price": price,
+        "tao_in": subnet_tao,
+        "alpha_in": alpha_in,
+        "market_cap": market_cap,
+        # Price changes not available in this API
+        "price_change_1h": 0.0,
+        "price_change_24h": 0.0,
+        "price_change_1w": 0.0,
+        "price_change_1m": 0.0,
+        # Volume and liquidity
+        "volume_24h": volume,
+        "liquidity": liquidity,
+        # Owner and emission
+        "owner": snapshot.get("subnet_owner", ""),
+        "emission": emission,
+        # Rank not directly available, will be calculated by templates if needed
+        "rank": 0,
     }
 
 
 async def fetch_all_subnets() -> Dict[str, Any]:
     """
-    Fetch all subnets from taostats API.
+    Fetch all subnets from TaoMarketCap Internal API.
 
     Returns:
         {
@@ -41,19 +88,15 @@ async def fetch_all_subnets() -> Dict[str, Any]:
             }
         }
     """
-    api_key = _get_api_key()
-    if not api_key:
-        raise APIFetchError("TAOSTATS_API_KEY environment variable not set", source="taostats")
-
     subnets = {}
 
     try:
         async with aiohttp.ClientSession() as session:
-            # Fetch pool data first (has name, price, etc.)
+            # Fetch all subnets (paginated, get up to 200)
             async with session.get(
-                f"{API_BASE_URL}/dtao/pool/latest/v1",
-                headers=_get_headers(),
-                params={"limit": 200}
+                f"{API_BASE_URL}/subnets",
+                params={"limit": 200},
+                timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
                 if resp.status != 200:
                     body = await resp.text()
@@ -63,56 +106,28 @@ async def fetch_all_subnets() -> Dict[str, Any]:
                         status_code=resp.status,
                     )
 
-                pool_data = await resp.json()
+                data = await resp.json()
+                results = data.get("results", [])
 
-                for pool in pool_data.get("data", []):
-                    netuid = str(pool.get("netuid", ""))
+                for subnet in results:
+                    netuid = str(subnet.get("netuid", ""))
                     if not netuid or netuid == "0":  # Skip root network
                         continue
 
-                    subnets[netuid] = {
-                        "netuid": int(netuid),
-                        "name": pool.get("name", ""),
-                        "price": float(pool.get("price", 0) or 0),
-                        "tao_in": float(pool.get("total_tao", 0) or 0),
-                        "alpha_in": float(pool.get("alpha_in_pool", 0) or 0),
-                        "market_cap": float(pool.get("market_cap", 0) or 0),
-                        # Price changes
-                        "price_change_1h": float(pool.get("price_change_1_hour", 0) or 0),
-                        "price_change_24h": float(pool.get("price_change_1_day", 0) or 0),
-                        "price_change_1w": float(pool.get("price_change_1_week", 0) or 0),
-                        "price_change_1m": float(pool.get("price_change_1_month", 0) or 0),
-                        # Volume
-                        "volume_24h": float(pool.get("tao_volume_24_hr", 0) or 0),
-                        # Other metrics
-                        "liquidity": float(pool.get("liquidity", 0) or 0),
-                        "rank": int(pool.get("rank", 0) or 0),
-                    }
-
-            # Fetch subnet data for owner info
-            async with session.get(
-                f"{API_BASE_URL}/subnet/latest/v1",
-                headers=_get_headers(),
-                params={"limit": 200}
-            ) as resp:
-                if resp.status == 200:
-                    subnet_data = await resp.json()
-
-                    for subnet in subnet_data.get("data", []):
-                        netuid = str(subnet.get("netuid", ""))
-                        if netuid in subnets:
-                            subnets[netuid]["owner"] = subnet.get("owner", {}).get("ss58", "")
-                            subnets[netuid]["emission"] = subnet.get("emission", 0)
+                    subnets[netuid] = _parse_subnet_data(subnet)
 
     except APIFetchError:
-        raise  # Already a proper error, propagate as-is
+        raise
     except Exception as e:
         raise APIFetchError(f"Unexpected error: {e}", source="taostats") from e
+
+    if not subnets:
+        raise APIFetchError("API returned no subnet data", source="taostats")
 
     return {"subnets": subnets}
 
 
-async def fetch_single_subnet_data(subnet_id: str) -> Optional[Dict[str, Any]]:
+async def fetch_single_subnet_data(subnet_id: str) -> Dict[str, Any]:
     """
     Fetch data for a single subnet.
 
@@ -120,48 +135,27 @@ async def fetch_single_subnet_data(subnet_id: str) -> Optional[Dict[str, Any]]:
         subnet_id: Subnet ID (e.g., "27")
 
     Returns:
-        Dict with subnet data, or empty dict on error
+        Dict with subnet data
+
+    Raises:
+        APIFetchError: If API request fails
     """
-    api_key = _get_api_key()
-    if not api_key:
-        raise APIFetchError("TAOSTATS_API_KEY environment variable not set", source="taostats")
-
     try:
-        result = {"netuid": int(subnet_id)}
-
         async with aiohttp.ClientSession() as session:
-            # Fetch pool data (has name, price, etc.)
             async with session.get(
-                f"{API_BASE_URL}/dtao/pool/latest/v1",
-                headers=_get_headers(),
-                params={"netuid": subnet_id}
+                f"{API_BASE_URL}/subnets/{subnet_id}",
+                timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
-                if resp.status == 200:
-                    pool_data = await resp.json()
-                    items = pool_data.get("data", [])
-                    if items:
-                        pool = items[0]
-                        result["name"] = pool.get("name", "")
-                        result["price"] = float(pool.get("price", 0) or 0)
-                        result["tao_in"] = float(pool.get("total_tao", 0) or 0)
-                        result["alpha_in"] = float(pool.get("alpha_in_pool", 0) or 0)
-                        result["market_cap"] = float(pool.get("market_cap", 0) or 0)
+                if resp.status != 200:
+                    body = await resp.text()
+                    raise APIFetchError(
+                        f"status={resp.status} for subnet_id={subnet_id}, body={body[:200]}",
+                        source="taostats",
+                        status_code=resp.status,
+                    )
 
-            # Fetch subnet info for owner
-            async with session.get(
-                f"{API_BASE_URL}/subnet/latest/v1",
-                headers=_get_headers(),
-                params={"netuid": subnet_id}
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    items = data.get("data", [])
-                    if items:
-                        subnet = items[0]
-                        result["owner"] = subnet.get("owner", {}).get("ss58", "")
-                        result["emission"] = subnet.get("emission", 0)
-
-            return result if len(result) > 1 else {}
+                subnet = await resp.json()
+                return _parse_subnet_data(subnet)
 
     except APIFetchError:
         raise
@@ -238,15 +232,9 @@ def initialize_cache():
     Must be called before generating taostats questions.
     Uses asyncio.run() to call async API.
     """
-    import asyncio
-
     global _subnet_cache
     if _subnet_cache is not None:
         return  # Already initialized
-
-    # Check API key before attempting to fetch
-    if not _get_api_key():
-        raise APIFetchError("TAOSTATS_API_KEY environment variable not set", source="taostats")
 
     try:
         # Try to get existing event loop

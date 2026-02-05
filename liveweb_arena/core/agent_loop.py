@@ -251,36 +251,13 @@ class AgentLoop:
                 log("Agent", f"Action: {action.action_type}")
                 old_url = obs.url if obs else None
 
-                # Retry logic for goto actions (network errors)
-                max_retries = 3 if action.action_type == "goto" else 1
-                last_error = None
+                # Execute action - browser handles navigation errors internally
+                # and returns error pages as valid observations
+                try:
+                    obs = await self._session.execute_action(action)
+                    action_result = "Success"
 
-                for attempt in range(max_retries):
-                    try:
-                        obs = await self._session.execute_action(action)
-                        action_result = "Success"
-                        last_error = None
-                        break
-                    except Exception as e:
-                        last_error = e
-                        if attempt < max_retries - 1:
-                            wait_time = 2 * (attempt + 1)
-                            log("Agent", f"Action failed (attempt {attempt + 1}/{max_retries}): {e}, retrying in {wait_time}s")
-                            await asyncio.sleep(wait_time)
-
-                # Network error after all retries = fatal (GT cannot be collected)
-                if last_error is not None:
-                    if action.action_type == "goto":
-                        url = action.params.get("url", "")
-                        raise BrowserFatalError(
-                            f"Navigation failed after {max_retries} retries: {last_error}",
-                            url=url,
-                            attempts=max_retries,
-                        )
-                    else:
-                        action_result = f"Failed: {last_error}"
-                else:
-                    # Track goto URL for retry on error pages
+                    # Track goto URL for error context
                     if action.action_type == "goto":
                         last_goto_url = action.params.get("url", "")
 
@@ -292,6 +269,9 @@ class AgentLoop:
                             raise  # Cache failure = browser can't load = terminate immediately
                         except Exception as e:
                             log("Agent", f"Navigation callback error: {e}")
+                except Exception as e:
+                    # Non-navigation action failed
+                    action_result = f"Failed: {e}"
 
             step = TrajectoryStep(
                 step_num=step_num,

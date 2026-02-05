@@ -159,8 +159,12 @@ class BrowserSession:
             return self._cache_interceptor.get_stats()
         return None
 
-    async def goto(self, url: str, max_retries: int = 3) -> BrowserObservation:
-        """Navigate to URL and return observation with automatic retry on failure"""
+    async def goto(self, url: str) -> BrowserObservation:
+        """Navigate to URL and return observation.
+
+        Error pages (chrome-error://) are returned as valid observations
+        so the AI can see them and decide what to do next.
+        """
         # Reset view offset when navigating to a new page
         self._view_offset = 0
         self._last_full_content = ""
@@ -169,25 +173,28 @@ class BrowserSession:
         if url and not url.startswith(("http://", "https://", "about:")):
             url = "https://" + url
 
-        for attempt in range(max_retries):
+        try:
+            await self._page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
+            # Wait a bit for dynamic content
             try:
-                await self._page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
-                # Wait a bit for dynamic content
                 await self._page.wait_for_load_state("networkidle", timeout=10000)
             except Exception:
                 # Network idle timeout is acceptable, page may still be usable
                 pass
-            # Check if navigation failed
-            current_url = self._page.url
-            if not current_url.startswith("chrome-error://"):
-                break  # Navigation succeeded
-            # Wait before retry
-            if attempt < max_retries - 1:
-                await asyncio.sleep(1.0 * (attempt + 1))
+        except Exception:
+            # Navigation exception - page may show error, return observation anyway
+            pass
+
+        # Return observation regardless of whether it's an error page
+        # AI can see the error and decide what to do
         return await self._get_observation()
 
-    async def execute_action(self, action: BrowserAction, max_nav_retries: int = 3) -> BrowserObservation:
-        """Execute browser action and return new observation"""
+    async def execute_action(self, action: BrowserAction) -> BrowserObservation:
+        """Execute browser action and return new observation.
+
+        Error pages (chrome-error://) are returned as valid observations
+        so the AI can see them and decide what to do next.
+        """
         action_type = action.action_type
         params = action.params
 
@@ -197,20 +204,16 @@ class BrowserSession:
                 # Ensure URL has protocol prefix
                 if url and not url.startswith(("http://", "https://", "about:")):
                     url = "https://" + url
-                # Retry navigation if it fails (chrome-error://)
-                for nav_attempt in range(max_nav_retries):
+                # Navigate and return observation (including error pages)
+                try:
                     await self._page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
                     try:
                         await self._page.wait_for_load_state("networkidle", timeout=10000)
                     except Exception:
                         pass
-                    # Check if navigation failed
-                    current_url = self._page.url
-                    if not current_url.startswith("chrome-error://"):
-                        break  # Navigation succeeded
-                    # Wait before retry
-                    if nav_attempt < max_nav_retries - 1:
-                        await asyncio.sleep(1.0 * (nav_attempt + 1))
+                except Exception:
+                    # Navigation exception - page may show error, continue to return observation
+                    pass
 
             elif action_type == "click":
                 selector = params.get("selector", "")

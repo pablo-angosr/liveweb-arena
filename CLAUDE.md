@@ -82,3 +82,56 @@ Each page is cached independently with its own `api_data` snapshot. Since list/h
 4. **Cross-site isolation**: Different sites cache independently. The same entity on site A vs site B has separate cached data.
 
 **Implication**: Templates requiring multi-entity data should expect the agent to visit each entity's detail page. Detail page visits progressively refine GT data and lock in authoritative values.
+
+## Website Selection Criteria
+
+When adding a new website/plugin to the evaluation system, it must meet these requirements:
+
+### 1. Must-Have Requirements
+
+| Requirement | Rationale |
+|-------------|-----------|
+| **Public API or structured data** | GT extraction requires reliable data source |
+| **No authentication required** | Agents cannot log in |
+| **Dynamic data** | Static data enables memorization attacks |
+| **Stable page structure** | Frequent redesigns break selectors |
+| **No aggressive anti-bot** | Must be accessible via Playwright |
+
+### 2. Evaluation Value
+
+A new website should add **at least one** capability dimension not covered by existing sites:
+
+| Dimension | Current Coverage | Gap |
+|-----------|-----------------|-----|
+| Numerical comparison | CoinGecko, Stooq, Taostats | ✅ Covered |
+| Ranking queries | CoinGecko, Stooq, Taostats | ✅ Covered |
+| Cross-site navigation | Hybrid templates | ✅ Covered |
+| Time-sensitive events | ❌ None | **Gap** |
+| Nested structure navigation | ❌ None | **Gap** |
+| Search-driven interaction | ❌ Weak | **Gap** |
+| User-generated content | ❌ None | **Gap** |
+
+### 3. Current Website Portfolio
+
+| Website | Domain | Data Type | Update Frequency |
+|---------|--------|-----------|------------------|
+| **CoinGecko** | Crypto | Price, market cap, volume | Real-time |
+| **Stooq** | Finance | OHLC, daily change | Real-time |
+| **Weather** | Weather | Temperature, forecast | Hourly |
+| **Taostats** | Blockchain | Subnet metrics | ~12 seconds |
+
+### 4. Template Quality Standards
+
+Each template must pass these quality gates:
+
+1. **Non-trivial**: Cannot be answered by visiting a single obvious page
+2. **Dynamic answer**: Answer changes over time (hours/days)
+3. **Computation required**: Needs comparison, aggregation, or logic
+4. **Unique capability**: Tests something other templates don't
+5. **Theoretically solvable**: Clear navigation path exists
+
+**Anti-patterns to avoid:**
+- Questions answerable from homepage alone
+- Static fact lookups (e.g., "What year was X founded?")
+- Questions requiring data not visible on the page
+- Duplicate logic with existing templates

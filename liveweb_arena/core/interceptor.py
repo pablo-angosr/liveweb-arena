@@ -125,6 +125,7 @@ class CacheInterceptor:
         allowed_domains: Set[str],
         blocked_patterns: Optional[List[str]] = None,
         cache_manager: Optional[CacheManager] = None,
+        url_validator: Optional[callable] = None,
     ):
         """
         Initialize interceptor.
@@ -134,10 +135,14 @@ class CacheInterceptor:
             allowed_domains: Set of allowed domain names
             blocked_patterns: Additional URL patterns to block
             cache_manager: CacheManager for checking file cache
+            url_validator: Optional callback (url: str) -> bool for dynamic URL validation.
+                          Used by plugins that support external navigation (e.g., HN).
+                          Called when domain is not in allowed_domains.
         """
         self.cached_pages = cached_pages
         self.allowed_domains = allowed_domains
         self.cache_manager = cache_manager
+        self.url_validator = url_validator
         self.stats = InterceptorStats()
         # Per-evaluation storage for cached accessibility trees
         self._accessibility_trees: Dict[str, str] = {}
@@ -327,7 +332,7 @@ class CacheInterceptor:
 
     def _is_domain_allowed(self, url: str) -> bool:
         """Check if URL's domain is allowed."""
-        if not self.allowed_domains:
+        if not self.allowed_domains and not self.url_validator:
             return True
 
         try:
@@ -338,10 +343,18 @@ class CacheInterceptor:
             if ":" in domain:
                 domain = domain.split(":")[0]
 
-            # Check exact match or subdomain match
+            # Check exact match or subdomain match against static whitelist
             for allowed in self.allowed_domains:
                 if domain == allowed or domain.endswith("." + allowed):
                     return True
+
+            # Try dynamic URL validator (for plugins with external navigation)
+            if self.url_validator:
+                try:
+                    if self.url_validator(url):
+                        return True
+                except Exception:
+                    pass
 
             return False
         except Exception:

@@ -142,6 +142,12 @@ class GTCollector:
         if content:
             self._page_contents[url] = content
 
+        # For external pages, extract title from accessibility tree
+        if api_data and api_data.get("is_external") and content:
+            title = self._extract_title_from_content(content)
+            if title:
+                api_data["title"] = title
+
         # Merge API data and log in one step
         collected_info = self._merge_api_data(url, api_data) if api_data else None
 
@@ -154,6 +160,120 @@ class GTCollector:
         # Track visited URLs
         for subtask in self.subtasks:
             self._visited_urls[subtask.answer_tag].append(url)
+
+    def _extract_title_from_content(self, content: str) -> Optional[str]:
+        """
+        Extract page title from accessibility tree or page content.
+
+        Handles multiple formats:
+        1. Accessibility tree: WebArea "Page Title" or RootWebArea "Page Title"
+        2. Accessibility tree: heading "Title"
+        3. Plain text: Look for lines that look like article titles
+
+        Args:
+            content: Accessibility tree or page content string
+
+        Returns:
+            Extracted title or None
+        """
+        import re
+
+        if not content:
+            return None
+
+        # Try to find WebArea with title (first line usually)
+        # Format: WebArea "Page Title" or RootWebArea "Page Title"
+        match = re.search(r'(?:Root)?WebArea\s+"([^"]+)"', content)
+        if match:
+            title = match.group(1).strip()
+            # Remove common site suffixes (e.g., "Title | GitHub", "Title - Site")
+            title = re.sub(r'\s*[|\-–—]\s*[^|\-–—]+$', '', title).strip()
+            if title:
+                return title
+
+        # Try to find document role with name
+        match = re.search(r'document\s+"([^"]+)"', content, re.IGNORECASE)
+        if match:
+            title = match.group(1).strip()
+            title = re.sub(r'\s*[|\-–—]\s*[^|\-–—]+$', '', title).strip()
+            if title:
+                return title
+
+        # Try to find heading role with title
+        match = re.search(r'heading\s+"([^"]+)"', content, re.IGNORECASE)
+        if match:
+            title = match.group(1).strip()
+            title = re.sub(r'\s*[|\-–—]\s*[^|\-–—]+$', '', title).strip()
+            if title and len(title) >= 5:
+                return title
+
+        # Fallback for plain text content: look for article title patterns
+        # Scan lines and score them by how likely they are to be titles
+        lines = content.split('\n')
+        candidates = []
+
+        for i, line in enumerate(lines[:25]):  # Check first 25 lines
+            line = line.strip()
+
+            # Skip very short or very long lines
+            if len(line) < 15 or len(line) > 250:
+                continue
+            # Skip lines that look like navigation/metadata
+            if re.match(r'^(home|about|contact|login|sign|menu|nav|©|copyright|\d{1,2}[/-]\d{1,2}|rss)', line.lower()):
+                continue
+            # Skip lines that look like domain names or URLs
+            if re.match(r'^[\w.-]+\.(com|org|net|io|dev|co|blog|site|app|ai)(/.*)?$', line.lower()):
+                continue
+            # Skip lines that look like code/technical content
+            if re.match(r'^[0-9A-Fa-f\s?*]+$', line):
+                continue
+            # Skip lines that are just dates
+            if re.match(r'^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[\s\d,]+\d{4}$', line.lower()):
+                continue
+
+            # Clean up the line
+            title = re.sub(r'\s*[|\-–—]\s*[^|\-–—]+$', '', line).strip()
+            if not title or len(title) < 15:
+                continue
+
+            # Score the candidate
+            score = 0
+            words = title.split()
+
+            # Prefer longer lines (more likely to be article titles)
+            if len(title) >= 30:
+                score += 3
+            elif len(title) >= 20:
+                score += 2
+            else:
+                score += 1
+
+            # Prefer lines with more words (3+ words is typical for titles)
+            if len(words) >= 5:
+                score += 3
+            elif len(words) >= 4:
+                score += 2
+            elif len(words) >= 3:
+                score += 1
+            else:
+                continue  # Skip lines with fewer than 3 words
+
+            # Lines with quotes often are article titles
+            if '"' in title or '"' in title or '"' in title or "'" in title:
+                score += 2
+
+            # Lines appearing later (past header/nav) are more likely to be content titles
+            if i >= 3:
+                score += 1
+
+            candidates.append((score, i, title))
+
+        # Return the highest scoring candidate
+        if candidates:
+            candidates.sort(key=lambda x: (-x[0], x[1]))  # Highest score first, then earliest
+            return candidates[0][2]
+
+        return None
 
     def _merge_api_data(self, url: str, api_data: Dict[str, Any]) -> Optional[str]:
         """
@@ -243,6 +363,52 @@ class GTCollector:
                 self._collected_api_data["taostats"]["subnets"][netuid] = api_data
                 name = api_data.get("name", f"SN{netuid}")
                 return f"subnet[{name}]"
+
+        elif "news.ycombinator.com" in url_lower:
+            if "stories" in api_data:
+                # Check if this is a category page (ask, show, jobs) or homepage
+                category = api_data.get("category")  # "ask", "show", "jobs", or None
+                added = 0
+                for story_id, data in api_data["stories"].items():
+                    if story_id not in self._collected_api_data:
+                        self._collected_api_data[story_id] = data
+                        added += 1
+                # Also store category-specific top story for category templates
+                if category:
+                    # Store the category's top stories under a category key
+                    category_key = f"hn_category:{category}"
+                    self._collected_api_data[category_key] = api_data
+                    return f"+{added} {category} stories"
+                if added > 0:
+                    return f"+{added} stories"
+                return None
+            elif "id" in api_data and "title" in api_data:
+                # Story detail page: merge with existing data, preserving rank
+                story_id = str(api_data["id"])
+                existing = self._collected_api_data.get(story_id, {})
+                # Preserve rank from homepage if not in detail data
+                if "rank" in existing and "rank" not in api_data:
+                    api_data["rank"] = existing["rank"]
+                self._collected_api_data[story_id] = api_data
+                return f"story[{story_id}]"
+            elif "user" in api_data:
+                # User page
+                username = api_data["user"].get("id", "unknown")
+                self._collected_api_data[f"user:{username}"] = api_data
+                return f"user[{username}]"
+
+        # Handle external pages (from HN story links)
+        if api_data.get("is_external"):
+            external_url = api_data.get("url", url)
+            title = api_data.get("title")
+            hn_story_rank = api_data.get("hn_story_rank")
+            if title:
+                # Store under external:{url} key
+                self._collected_api_data[f"external:{external_url}"] = api_data
+                # Also store under hn_external:{rank} for easy template lookup
+                if hn_story_rank:
+                    self._collected_api_data[f"hn_external:{hn_story_rank}"] = api_data
+                return f"external[{title[:30]}...]"
 
         return None
 

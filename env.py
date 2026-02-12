@@ -296,6 +296,9 @@ class Actor:
                     blocked_patterns.extend(plugin.get_blocked_patterns())
                 elif hasattr(plugin, 'blocked_url_patterns'):
                     blocked_patterns.extend(plugin.blocked_url_patterns)
+                # Clear dynamic state for plugins supporting external navigation
+                if hasattr(plugin, 'clear_external_urls'):
+                    plugin.clear_external_urls()
 
         blocked_patterns = list(set(blocked_patterns))
         if blocked_patterns:
@@ -314,6 +317,14 @@ class Actor:
         interceptor = None
         gt_collector = None
 
+        # Create URL validator for plugins supporting external navigation
+        def url_validator(url: str) -> bool:
+            """Check if any plugin allows this URL (for dynamic external navigation)."""
+            for p in plugins_used.values():
+                if hasattr(p, 'is_url_allowed') and p.is_url_allowed(url):
+                    return True
+            return False
+
         try:
             # Create browser session
             session = await self.browser.new_session()
@@ -324,6 +335,7 @@ class Actor:
                 allowed_domains=allowed_domains,
                 blocked_patterns=blocked_patterns if blocked_patterns else None,
                 cache_manager=self.cache_manager if self.use_cache else None,
+                url_validator=url_validator,
             )
 
             # Install route handler using session's set_cache_interceptor method
@@ -347,6 +359,20 @@ class Actor:
             # Track accessibility trees for real-time GT collection
             step_accessibility_trees: Dict[str, str] = {}
 
+            # Helper to find plugin for a URL (includes external URL support)
+            def find_plugin_for_url(url: str):
+                """Find the plugin that handles this URL."""
+                # First try domain matching
+                for p in plugins_used.values():
+                    for domain in p.allowed_domains:
+                        if _url_matches_domain(url, domain):
+                            return p
+                # Then check dynamic URL validation (for external navigation)
+                for p in plugins_used.values():
+                    if hasattr(p, 'is_url_allowed') and p.is_url_allowed(url):
+                        return p
+                return None
+
             # Create navigation callback for caching and GT tracking
             async def on_navigation(url: str):
                 # Cache the page on navigation if in cache mode
@@ -354,14 +380,7 @@ class Actor:
                     normalized = normalize_url(url)
                     if normalized not in cached_pages:
                         # Determine which plugin to use for API data
-                        plugin = None
-                        for p in plugins_used.values():
-                            for domain in p.allowed_domains:
-                                if _url_matches_domain(url, domain):
-                                    plugin = p
-                                    break
-                            if plugin:
-                                break
+                        plugin = find_plugin_for_url(url)
 
                         if plugin:
                             # Check if this page needs API data (detail page vs navigation page)
@@ -377,6 +396,13 @@ class Actor:
                             cached_pages.update(pages)
                             req_type = "data" if need_api else "nav"
                             log("Actor", f"Cached ({req_type}): {url[:55]}...")
+
+                            # For plugins with external URL support, register external URLs
+                            # from cached api_data (needed when cache HIT bypasses fetch_api_data)
+                            if hasattr(plugin, '_extract_external_urls'):
+                                for cached_page in pages.values():
+                                    if cached_page.api_data:
+                                        plugin._extract_external_urls(cached_page.api_data)
 
             # Observation callback for real-time GT collection (fires when page is viewed)
             async def on_observation(obs):
@@ -395,27 +421,23 @@ class Actor:
                         else:
                             # LIVE mode: fetch api_data from network
                             # This ensures GT matches what agent sees in real-time
-                            for p in plugins_used.values():
-                                for domain in p.allowed_domains:
-                                    if _url_matches_domain(url, domain):
-                                        need_api = p.needs_api_data(url)
-                                        if need_api:
-                                            # Data page: API fetch must succeed
-                                            try:
-                                                api_data = await p.fetch_api_data(url)
-                                            except Exception as e:
-                                                raise CacheFatalError(
-                                                    f"LIVE mode API fetch failed (GT invalid): {e}",
-                                                    url=url,
-                                                )
-                                            if not api_data:
-                                                raise CacheFatalError(
-                                                    f"LIVE mode API returned empty data (GT invalid)",
-                                                    url=url,
-                                                )
-                                        break
-                                if api_data:
-                                    break
+                            plugin = find_plugin_for_url(url)
+                            if plugin:
+                                need_api = plugin.needs_api_data(url)
+                                if need_api:
+                                    # Data page: API fetch must succeed
+                                    try:
+                                        api_data = await plugin.fetch_api_data(url)
+                                    except Exception as e:
+                                        raise CacheFatalError(
+                                            f"LIVE mode API fetch failed (GT invalid): {e}",
+                                            url=url,
+                                        )
+                                    if not api_data:
+                                        raise CacheFatalError(
+                                            f"LIVE mode API returned empty data (GT invalid)",
+                                            url=url,
+                                        )
 
                         # Collect GT from this page visit
                         await gt_collector.on_page_visit(
@@ -757,6 +779,9 @@ class Actor:
                     blocked_patterns.extend(plugin.get_blocked_patterns())
                 elif hasattr(plugin, 'blocked_url_patterns'):
                     blocked_patterns.extend(plugin.blocked_url_patterns)
+                # Clear dynamic state for plugins supporting external navigation
+                if hasattr(plugin, 'clear_external_urls'):
+                    plugin.clear_external_urls()
 
         blocked_patterns = list(set(blocked_patterns))
 
@@ -769,6 +794,14 @@ class Actor:
         gt_collector = None
         episode_added = False
 
+        # Create URL validator for plugins supporting external navigation
+        def url_validator(url: str) -> bool:
+            """Check if any plugin allows this URL (for dynamic external navigation)."""
+            for p in plugins_used.values():
+                if hasattr(p, 'is_url_allowed') and p.is_url_allowed(url):
+                    return True
+            return False
+
         try:
             # Create browser session
             session = await self.browser.new_session()
@@ -779,6 +812,7 @@ class Actor:
                 allowed_domains=allowed_domains,
                 blocked_patterns=blocked_patterns if blocked_patterns else None,
                 cache_manager=self.cache_manager if self.use_cache else None,
+                url_validator=url_validator,
             )
 
             # Install route handler
@@ -1207,7 +1241,7 @@ class Actor:
         if normalized in episode.cached_pages:
             return
 
-        # Find plugin for this URL
+        # Find plugin for this URL (includes external URL support)
         plugin = None
         for p in episode.plugins_used.values():
             for domain in p.allowed_domains:
@@ -1216,6 +1250,12 @@ class Actor:
                     break
             if plugin:
                 break
+        # Check dynamic URL validation (for external navigation)
+        if not plugin:
+            for p in episode.plugins_used.values():
+                if hasattr(p, 'is_url_allowed') and p.is_url_allowed(url):
+                    plugin = p
+                    break
 
         if not plugin:
             return
@@ -1230,6 +1270,13 @@ class Actor:
             episode.cached_pages.update(pages)
             req_type = "data" if need_api else "nav"
             log("Actor", f"Cached ({req_type}): {url[:55]}...")
+
+            # For plugins with external URL support, register external URLs
+            # from cached api_data (needed when cache HIT bypasses fetch_api_data)
+            if hasattr(plugin, '_extract_external_urls'):
+                for cached_page in pages.values():
+                    if cached_page.api_data:
+                        plugin._extract_external_urls(cached_page.api_data)
         except CacheFatalError:
             raise
         except Exception as e:
@@ -1251,27 +1298,38 @@ class Actor:
                 api_data = cached_page.api_data
         else:
             # LIVE mode: fetch api_data from network
+            # Find plugin for this URL (includes external URL support)
+            plugin = None
             for p in episode.plugins_used.values():
                 for domain in p.allowed_domains:
                     if _url_matches_domain(url, domain):
-                        need_api = p.needs_api_data(url)
-                        if need_api:
-                            # Data page: API fetch must succeed
-                            try:
-                                api_data = await p.fetch_api_data(url)
-                            except Exception as e:
-                                raise CacheFatalError(
-                                    f"LIVE mode API fetch failed (GT invalid): {e}",
-                                    url=url,
-                                )
-                            if not api_data:
-                                raise CacheFatalError(
-                                    f"LIVE mode API returned empty data (GT invalid)",
-                                    url=url,
-                                )
+                        plugin = p
                         break
-                if api_data:
+                if plugin:
                     break
+            # Check dynamic URL validation (for external navigation)
+            if not plugin:
+                for p in episode.plugins_used.values():
+                    if hasattr(p, 'is_url_allowed') and p.is_url_allowed(url):
+                        plugin = p
+                        break
+
+            if plugin:
+                need_api = plugin.needs_api_data(url)
+                if need_api:
+                    # Data page: API fetch must succeed
+                    try:
+                        api_data = await plugin.fetch_api_data(url)
+                    except Exception as e:
+                        raise CacheFatalError(
+                            f"LIVE mode API fetch failed (GT invalid): {e}",
+                            url=url,
+                        )
+                    if not api_data:
+                        raise CacheFatalError(
+                            f"LIVE mode API returned empty data (GT invalid)",
+                            url=url,
+                        )
 
         # Collect GT from this page visit
         await episode.gt_collector.on_page_visit(

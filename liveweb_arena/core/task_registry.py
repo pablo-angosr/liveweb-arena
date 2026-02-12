@@ -11,10 +11,31 @@ Usage:
     # Without task_id (random, backward compatible)
     config = TaskRegistry.random_config(seed=100, num_tasks=3)
 
-Adding new templates:
-    1. Add template to TEMPLATES dict with a new ID
-    2. Call TaskRegistry.rebuild_combinations()
-    3. New combinations are appended, old task_ids unchanged
+=== IMPORTANT: Adding New Templates ===
+
+To add new templates while preserving existing task_id mappings:
+
+1. Add template to TEMPLATES dict with a NEW ID (not used before)
+2. Add the new template ID to a NEW entry in TEMPLATE_VERSIONS list
+3. Run TaskRegistry.rebuild_combinations() - new combos are appended at end
+
+Example - adding a new "reddit" plugin with 2 templates:
+
+    # In TEMPLATES dict:
+    80: ("reddit", "reddit_top_post"),
+    81: ("reddit", "reddit_comment_count"),
+
+    # In TEMPLATE_VERSIONS list, add a new entry:
+    TEMPLATE_VERSIONS = [
+        [...],  # Version 1: original (DO NOT MODIFY)
+        [70, 71, 72, 73],  # Version 2: hackernews (DO NOT MODIFY)
+        [80, 81],  # Version 3: reddit (NEW)
+    ]
+
+Rules:
+- NEVER modify existing TEMPLATE_VERSIONS entries
+- NEVER reuse template IDs that were used before
+- Always add new templates as a new version entry
 """
 
 import random
@@ -85,8 +106,36 @@ class TaskRegistry:
         59: ("hybrid", "hybrid_cross_domain_calc"),
         60: ("hybrid", "hybrid_satisficing_search"),
 
-        # Add new templates here with new IDs...
+        # Hacker News templates (IDs 70+ to preserve existing task_id mappings)
+        # 70-73: removed (SFT-friendly templates with low RL value)
+        74: ("hackernews", "hackernews_external_page_title"),
+        75: ("hackernews", "hackernews_multi_condition_filter"),
+        76: ("hackernews", "hackernews_extrema_comparison"),
+        77: ("hackernews", "hackernews_category_comparison"),
+
+        # Add new templates here with new IDs (80+)...
     }
+
+    # Template versions - each version's combinations come AFTER all previous versions
+    # This ensures existing task_ids are never affected when adding new templates.
+    #
+    # === RULES ===
+    # 1. NEVER modify existing entries - only append new entries
+    # 2. Each entry is a list of template IDs added in that version
+    # 3. Template IDs must be unique across ALL versions
+    #
+    # Combination order:
+    # - First: all combos using only Version 1 IDs
+    # - Then: combos involving at least one Version 2 ID
+    # - Then: combos involving at least one Version 3 ID
+    # - etc.
+    TEMPLATE_VERSIONS: List[List[int]] = [
+        # Version 1: Original templates (frozen - DO NOT MODIFY)
+        [1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 15, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 50, 51, 52, 53, 56, 58, 59, 60],
+        # Version 2: Hacker News templates (redesigned for RL - IDs 70-73 removed)
+        [74, 75, 76, 77],
+        # Add new versions here...
+    ]
 
     # Combination registry: list of template ID tuples
     # Order is permanent, only append new combinations
@@ -102,25 +151,78 @@ class TaskRegistry:
     @classmethod
     def rebuild_combinations(cls):
         """
-        Build all template combinations.
+        Build all template combinations in a stable, version-aware order.
 
-        This generates combinations in a deterministic order:
-        1. All 1-template combinations (sorted by ID)
-        2. All 2-template combinations (sorted)
-        3. All 3-template combinations (sorted)
+        Combinations are generated version by version:
+        1. All combinations using only Version 1 template IDs
+        2. Combinations involving at least one Version 2 ID (may include V1 IDs)
+        3. Combinations involving at least one Version 3 ID (may include V1, V2 IDs)
+        4. etc.
 
-        When new templates are added, their combinations are appended
-        at the end of each size group, maintaining existing indices.
+        This ensures:
+        - Existing task_ids always map to the same questions
+        - New templates only add new task_ids at the end
+        - No need to track STABLE_MAX_ID - versions handle it automatically
         """
-        template_ids = sorted(cls.TEMPLATES.keys())
-
+        all_ids = sorted(cls.TEMPLATES.keys())
         new_combinations = []
-        for size in range(1, cls.MAX_COMBO_SIZE + 1):
-            for combo in combinations(template_ids, size):
-                new_combinations.append(combo)
+
+        # Track which IDs have been "seen" (from previous versions)
+        seen_ids = set()
+
+        for version_idx, version_ids in enumerate(cls.TEMPLATE_VERSIONS):
+            version_ids_set = set(version_ids)
+
+            if version_idx == 0:
+                # Version 1: generate all combinations using only these IDs
+                v1_ids = sorted(version_ids)
+                for size in range(1, cls.MAX_COMBO_SIZE + 1):
+                    for combo in combinations(v1_ids, size):
+                        new_combinations.append(combo)
+            else:
+                # Later versions: generate combinations involving at least one NEW ID
+                # (can include IDs from previous versions)
+                all_seen_ids = sorted(seen_ids | version_ids_set)
+                for size in range(1, cls.MAX_COMBO_SIZE + 1):
+                    for combo in combinations(all_seen_ids, size):
+                        # Include only if at least one ID is from this version
+                        if any(tid in version_ids_set for tid in combo):
+                            new_combinations.append(combo)
+
+            # Mark this version's IDs as seen
+            seen_ids.update(version_ids_set)
 
         cls._combinations = new_combinations
         cls._initialized = True
+
+    @classmethod
+    def validate_templates(cls) -> List[str]:
+        """
+        Validate that TEMPLATES and TEMPLATE_VERSIONS are consistent.
+
+        Returns:
+            List of error messages (empty if valid)
+        """
+        errors = []
+
+        # Check all template IDs are in TEMPLATE_VERSIONS
+        version_ids = set()
+        for v_ids in cls.TEMPLATE_VERSIONS:
+            version_ids.update(v_ids)
+
+        for tid in cls.TEMPLATES.keys():
+            if tid not in version_ids:
+                errors.append(f"Template ID {tid} not in TEMPLATE_VERSIONS")
+
+        # Check for duplicate IDs across versions
+        seen = set()
+        for v_idx, v_ids in enumerate(cls.TEMPLATE_VERSIONS):
+            for tid in v_ids:
+                if tid in seen:
+                    errors.append(f"Duplicate template ID {tid} in version {v_idx + 1}")
+                seen.add(tid)
+
+        return errors
 
     @classmethod
     def get_combinations(cls) -> List[Tuple[int, ...]]:

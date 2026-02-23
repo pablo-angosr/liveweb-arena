@@ -349,15 +349,21 @@ class GTCollector:
                 return f"weather[{location}]"
 
         elif "taostats" in url_lower:
-            # Homepage/list page: {"subnets": {...}}
+            # Homepage/list page: {"subnets": {...}} — add new only, never overwrite
             if "subnets" in api_data:
                 subnets = api_data["subnets"]
-                self._collected_api_data["taostats"] = api_data
-                return f"+{len(subnets)} subnets"
-            # Detail page: {"netuid": ..., "name": ..., ...}
+                if "taostats" not in self._collected_api_data:
+                    self._collected_api_data["taostats"] = {"subnets": {}}
+                existing = self._collected_api_data["taostats"].setdefault("subnets", {})
+                added = 0
+                for netuid, data in subnets.items():
+                    if netuid not in existing:
+                        existing[netuid] = data
+                        added += 1
+                return f"+{added} subnets (total {len(existing)})"
+            # Detail page: {"netuid": ..., "name": ..., ...} — always overwrite
             elif "netuid" in api_data:
                 netuid = str(api_data["netuid"])
-                # Store under taostats.subnets.{netuid}
                 if "taostats" not in self._collected_api_data:
                     self._collected_api_data["taostats"] = {"subnets": {}}
                 self._collected_api_data["taostats"]["subnets"][netuid] = api_data

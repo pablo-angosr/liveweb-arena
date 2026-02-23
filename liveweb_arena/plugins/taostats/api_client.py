@@ -218,12 +218,17 @@ async def get_subnet_data(subnet_id: int) -> Dict[str, Any]:
 
 
 def _normalize_emission(subnets: Dict[str, Any]) -> Dict[str, Any]:
-    """Ensure emission values are percentages (sum to ~100), not absolute TAO."""
+    """Ensure emission values are percentages (sum to ~100), not absolute TAO.
+
+    Returns a new dict to avoid mutating GT collector's shared data.
+    """
     if not subnets:
         return subnets
     total = sum(float(s.get("emission", 0) or 0) for s in subnets.values())
-    # Absolute TAO values sum to <10; percentages sum to ~100
+    # Absolute TAO values sum to <50; percentages sum to ~100
     if 0 < total < 50:
+        import copy
+        subnets = copy.deepcopy(subnets)
         for s in subnets.values():
             raw = float(s.get("emission", 0) or 0)
             s["emission"] = (raw / total) * 100

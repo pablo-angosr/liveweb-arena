@@ -181,7 +181,17 @@ class CacheInterceptor:
             # Block tracking/analytics
             if self._should_block(url):
                 self.stats.blocked += 1
-                await route.abort("blockedbyclient")
+                # For document navigations (click-initiated), abort produces
+                # chrome-error:// which the AI sees as a network error.
+                # Use fulfill with HTML instead so the browser stays healthy.
+                if resource_type == "document":
+                    await route.fulfill(
+                        status=403,
+                        headers={"content-type": "text/html"},
+                        body="<html><body><h1>Blocked</h1><p>URL blocked by policy.</p></body></html>",
+                    )
+                else:
+                    await route.abort("blockedbyclient")
                 return
 
             # Handle by resource type
@@ -197,10 +207,16 @@ class CacheInterceptor:
         except Exception as e:
             logger.error(f"Interceptor error for {url}: {e}")
             self.stats.errors += 1
+            # Fallback: let the request through to network instead of aborting.
+            # Aborting a click-initiated document navigation produces chrome-error://
+            # which the AI sees as "Page failed to load - network error".
             try:
-                await route.abort("failed")
+                await route.continue_()
             except Exception:
-                pass
+                try:
+                    await route.abort("failed")
+                except Exception:
+                    pass
 
     async def _handle_document(self, route: Route, url: str):
         """Handle HTML document requests."""

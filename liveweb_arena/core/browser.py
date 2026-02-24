@@ -536,8 +536,14 @@ class BrowserSession:
             try:
                 url = self._page.url
 
-                # Check for error pages - no need to wait
+                # Check for error pages - recover browser state via goBack()
                 if url.startswith("chrome-error://") or url.startswith("about:neterror"):
+                    # goBack() restores the browser to the previous valid page,
+                    # preventing cascading errors on subsequent actions.
+                    try:
+                        await self._page.go_back(timeout=5000)
+                    except Exception:
+                        pass
                     return BrowserObservation(
                         url=url,
                         title="Error",

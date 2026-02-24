@@ -374,20 +374,24 @@ class GTCollector:
             if "stories" in api_data:
                 # Check if this is a category page (ask, show, jobs) or homepage
                 category = api_data.get("category")  # "ask", "show", "jobs", or None
-                added = 0
-                for story_id, data in api_data["stories"].items():
-                    if story_id not in self._collected_api_data:
-                        self._collected_api_data[story_id] = data
-                        added += 1
-                # Also store category-specific top story for category templates
                 if category:
-                    # Store the category's top stories under a category key
+                    # Category page: store under category key ONLY.
+                    # Do NOT store as individual entries — category-internal ranks
+                    # (rank 1 in Ask != rank 1 on homepage) would contaminate
+                    # homepage-based templates (extrema, multi_condition, summary).
                     category_key = f"hn_category:{category}"
                     self._collected_api_data[category_key] = api_data
-                    return f"+{added} {category} stories"
-                if added > 0:
-                    return f"+{added} stories"
-                return None
+                    return f"+{len(api_data['stories'])} {category} stories"
+                else:
+                    # Homepage: store individual stories
+                    added = 0
+                    for story_id, data in api_data["stories"].items():
+                        if story_id not in self._collected_api_data:
+                            self._collected_api_data[story_id] = data
+                            added += 1
+                    if added > 0:
+                        return f"+{added} stories"
+                    return None
             elif "id" in api_data and "title" in api_data:
                 # Story detail page: merge with existing data, preserving rank
                 story_id = str(api_data["id"])

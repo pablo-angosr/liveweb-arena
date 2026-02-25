@@ -84,7 +84,7 @@ def _parse_stooq_csv(csv_text: str, symbol: str = "") -> Optional[Dict[str, Any]
         "high": parse_float(today_data.get("high")),
         "low": parse_float(today_data.get("low")),
         "close": close,
-        "volume": parse_float(today_data.get("volume")) or 0,
+        "volume": parse_float(today_data.get("volume")),
         "daily_change": daily_change,
         "daily_change_pct": daily_change_pct,
     }
@@ -106,7 +106,7 @@ def _parse_stooq_csv(csv_text: str, symbol: str = "") -> Optional[Dict[str, Any]
                     "high": parse_float(row_data.get("high")),
                     "low": parse_float(row_data.get("low")),
                     "close": row_close,
-                    "volume": parse_float(row_data.get("volume")) or 0,
+                    "volume": parse_float(row_data.get("volume")),
                 })
     result["history"] = history
 

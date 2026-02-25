@@ -158,9 +158,9 @@ class ThresholdTemplate(QuestionTemplate):
             if not name or name.lower() == "unknown":
                 continue
 
-            value = data.get(metric_field, 0)
+            value = data.get(metric_field)
             if value is None:
-                value = 0
+                continue
 
             if compare_fn(float(value), threshold):
                 count += 1

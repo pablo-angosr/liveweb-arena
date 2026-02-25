@@ -120,23 +120,23 @@ class CoinGeckoTopMoversTemplate(QuestionTemplate):
         if not valid_coins:
             return GroundTruthResult.fail("No valid coins with 24h change data in collected")
 
-        # Sort by 24h change
+        # Sort by 24h change (all coins guaranteed to have the field by filter above)
         if query_type == "gainer":
             sorted_coins = sorted(
                 valid_coins,
-                key=lambda x: x.get("price_change_percentage_24h", 0),
+                key=lambda x: x["price_change_percentage_24h"],
                 reverse=True
             )
         else:
             sorted_coins = sorted(
                 valid_coins,
-                key=lambda x: x.get("price_change_percentage_24h", 0),
+                key=lambda x: x["price_change_percentage_24h"],
                 reverse=False
             )
 
         top_coin = sorted_coins[0]
         name = top_coin.get("name", "Unknown")
-        change = top_coin.get("price_change_percentage_24h", 0)
+        change = top_coin["price_change_percentage_24h"]
 
         if query_type == "gainer":
             return GroundTruthResult.ok(f"{name} (+{change:.2f}%)")

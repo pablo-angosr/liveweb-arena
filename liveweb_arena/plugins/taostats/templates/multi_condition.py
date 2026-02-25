@@ -132,9 +132,15 @@ class MultiConditionTemplate(QuestionTemplate):
             if not name or name.lower() == "unknown":
                 continue
 
-            change_24h = float(data.get("price_change_24h", 0) or 0)
-            change_1w = float(data.get("price_change_1w", 0) or 0)
-            emission = float(data.get("emission", 0) or 0)
+            raw_24h = data.get("price_change_24h")
+            raw_1w = data.get("price_change_1w")
+            raw_emission = data.get("emission")
+            if raw_24h is None or raw_1w is None:
+                continue
+
+            change_24h = float(raw_24h)
+            change_1w = float(raw_1w)
+            emission = float(raw_emission) if raw_emission is not None else 0.0
 
             match = False
             if condition_type == "positive_24h_negative_1w":

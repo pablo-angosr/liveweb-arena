@@ -17,6 +17,16 @@ API_BASE_URL = "https://api.taomarketcap.com/internal/v1"
 RAO_TO_TAO = 1e9
 
 
+def _safe_float(value) -> Optional[float]:
+    """Convert value to float, returning None for missing/invalid data."""
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
 def _parse_subnet_data(subnet: Dict[str, Any]) -> Dict[str, Any]:
     """
     Parse subnet data from TaoMarketCap Internal API format.
@@ -35,21 +45,33 @@ def _parse_subnet_data(subnet: Dict[str, Any]) -> Dict[str, Any]:
     # Get name from identities or fall back to symbol
     name = identities.get("subnetName", "") or snapshot.get("token_symbol", f"SN{netuid}")
 
-    # Convert rao values to TAO
-    subnet_tao = float(snapshot.get("subnet_tao", 0) or 0) / RAO_TO_TAO
-    alpha_in = float(snapshot.get("subnet_alpha_in", 0) or 0) / RAO_TO_TAO
-    volume = float(snapshot.get("subnet_volume", 0) or 0) / RAO_TO_TAO
-    emission = float(snapshot.get("subnet_tao_in_emission", 0) or 0) / RAO_TO_TAO
+    # Convert rao values to TAO (None-safe: preserve None for missing data)
+    _subnet_tao = _safe_float(snapshot.get("subnet_tao"))
+    subnet_tao = _subnet_tao / RAO_TO_TAO if _subnet_tao is not None else None
+
+    _alpha_in = _safe_float(snapshot.get("subnet_alpha_in"))
+    alpha_in = _alpha_in / RAO_TO_TAO if _alpha_in is not None else None
+
+    _volume = _safe_float(snapshot.get("subnet_volume"))
+    volume = _volume / RAO_TO_TAO if _volume is not None else None
+
+    _emission = _safe_float(snapshot.get("subnet_tao_in_emission"))
+    emission = _emission / RAO_TO_TAO if _emission is not None else None
 
     # Liquidity from dtao
-    liquidity = float(dtao.get("taoLiquidity", 0) or 0) / RAO_TO_TAO
+    _liquidity = _safe_float(dtao.get("taoLiquidity"))
+    liquidity = _liquidity / RAO_TO_TAO if _liquidity is not None else None
 
     # Price is already in TAO units
-    price = float(snapshot.get("price", 0) or 0)
+    price = _safe_float(snapshot.get("price"))
 
     # Calculate market cap (price * total alpha supply)
-    alpha_out = float(snapshot.get("subnet_alpha_out", 0) or 0) / RAO_TO_TAO
-    market_cap = price * alpha_out if price and alpha_out else 0
+    _alpha_out = _safe_float(snapshot.get("subnet_alpha_out"))
+    alpha_out = _alpha_out / RAO_TO_TAO if _alpha_out is not None else None
+    if price is not None and alpha_out is not None:
+        market_cap = price * alpha_out
+    else:
+        market_cap = None
 
     return {
         "netuid": int(netuid),
@@ -59,10 +81,10 @@ def _parse_subnet_data(subnet: Dict[str, Any]) -> Dict[str, Any]:
         "alpha_in": alpha_in,
         "market_cap": market_cap,
         # Price changes from dtao snapshot
-        "price_change_1h": float(dtao.get("price_diff_hour", 0) or 0),
-        "price_change_24h": float(dtao.get("price_diff_day", 0) or 0),
-        "price_change_1w": float(dtao.get("price_diff_week", 0) or 0),
-        "price_change_1m": float(dtao.get("price_diff_month", 0) or 0),
+        "price_change_1h": _safe_float(dtao.get("price_diff_hour")),
+        "price_change_24h": _safe_float(dtao.get("price_diff_day")),
+        "price_change_1w": _safe_float(dtao.get("price_diff_week")),
+        "price_change_1m": _safe_float(dtao.get("price_diff_month")),
         # Volume and liquidity
         "volume_24h": volume,
         "liquidity": liquidity,
@@ -224,14 +246,18 @@ def _normalize_emission(subnets: Dict[str, Any]) -> Dict[str, Any]:
     """
     if not subnets:
         return subnets
-    total = sum(float(s.get("emission", 0) or 0) for s in subnets.values())
+    total = sum(
+        float(s["emission"]) for s in subnets.values()
+        if s.get("emission") is not None
+    )
     # Absolute TAO values sum to <50; percentages sum to ~100
     if 0 < total < 50:
         import copy
         subnets = copy.deepcopy(subnets)
         for s in subnets.values():
-            raw = float(s.get("emission", 0) or 0)
-            s["emission"] = (raw / total) * 100
+            raw = s.get("emission")
+            if raw is not None:
+                s["emission"] = (float(raw) / total) * 100
     return subnets
 
 
@@ -239,7 +265,11 @@ def _filter_by_emission(subnets: Dict[str, Any]) -> Dict[str, Any]:
     """Filter subnets to top half by emission, removing low-activity noise subnets."""
     if not subnets:
         return subnets
-    ranked = sorted(subnets.items(), key=lambda kv: kv[1].get("emission", 0), reverse=True)
+    ranked = sorted(
+        subnets.items(),
+        key=lambda kv: float(kv[1]["emission"]) if kv[1].get("emission") is not None else -1,
+        reverse=True,
+    )
     keep = len(ranked) // 2
     filtered = dict(ranked[:keep])
     log("Filter", f"Emission top-half: {len(subnets)} → {len(filtered)} subnets")

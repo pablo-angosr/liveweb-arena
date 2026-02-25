@@ -163,8 +163,19 @@ class AnalysisTemplate(QuestionTemplate):
                 missing.append(f"SN{netuid} ({subnet_names[i]})")
                 continue
 
-            price = float(data.get("price", 0) or 0)
-            tao_in = float(data.get("tao_in", 0) or 0)
+            raw_price = data.get("price")
+            raw_tao_in = data.get("tao_in")
+            if raw_price is None:
+                return GroundTruthResult.system_error(
+                    f"Missing 'price' for SN{netuid} ({subnet_names[i]})"
+                )
+            if raw_tao_in is None:
+                return GroundTruthResult.system_error(
+                    f"Missing 'tao_in' for SN{netuid} ({subnet_names[i]})"
+                )
+
+            price = float(raw_price)
+            tao_in = float(raw_tao_in)
             price_to_stake = price / tao_in if tao_in > 0 else 0
 
             subnet_list.append({

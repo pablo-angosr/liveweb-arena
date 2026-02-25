@@ -102,7 +102,7 @@ def _fetch_top_subnet_ids(top_n: int = 10) -> List[int]:
 
     # Sort by emission descending - matches taostats.io default page sort
     sorted_subnets = sorted(
-        [(int(k), float(v.get("emission", 0) or 0)) for k, v in subnets.items() if k != "0"],
+        [(int(k), float(v["emission"]) if v.get("emission") is not None else 0.0) for k, v in subnets.items() if k != "0"],
         key=lambda x: x[1],
         reverse=True
     )

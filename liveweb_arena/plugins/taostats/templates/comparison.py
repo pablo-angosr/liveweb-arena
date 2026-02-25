@@ -163,15 +163,23 @@ class ComparisonTemplate(QuestionTemplate):
                 f"Subnet {id2} ({name2}) not found in collected data"
             )
 
-        # Get values based on metric
-        if metric == "price":
-            val1 = float(data1.get("price", 0) or 0)
-            val2 = float(data2.get("price", 0) or 0)
-        elif metric == "tao_staked":
-            val1 = float(data1.get("tao_in", 0) or 0)
-            val2 = float(data2.get("tao_in", 0) or 0)
-        else:
+        # Get values based on metric (explicit None check)
+        metric_field = {"price": "price", "tao_staked": "tao_in"}.get(metric)
+        if metric_field is None:
             return GroundTruthResult.fail(f"Unknown metric: {metric}")
+
+        raw1 = data1.get(metric_field)
+        raw2 = data2.get(metric_field)
+        if raw1 is None:
+            return GroundTruthResult.system_error(
+                f"Missing '{metric_field}' for subnet {id1} ({name1})"
+            )
+        if raw2 is None:
+            return GroundTruthResult.system_error(
+                f"Missing '{metric_field}' for subnet {id2} ({name2})"
+            )
+        val1 = float(raw1)
+        val2 = float(raw2)
 
         # Return name of subnet with higher value
         return GroundTruthResult.ok(name1 if val1 > val2 else name2)

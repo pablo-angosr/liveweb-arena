@@ -223,19 +223,31 @@ class StooqComparisonTemplate(QuestionTemplate):
                 return GroundTruthResult.retry("Failed to fetch enough instrument data")
             return GroundTruthResult.fail("Could not fetch data for at least 2 instruments")
 
-        # Determine winner based on comparison type
-        if comparison_type == "higher_price":
-            winner = max(all_data.values(), key=lambda x: x.get("close", 0) or 0)
-        elif comparison_type == "lower_price":
-            winner = min(all_data.values(), key=lambda x: x.get("close", float('inf')) or float('inf'))
-        elif comparison_type == "better_performance":
-            winner = max(all_data.values(), key=lambda x: x.get("change_percent", -float('inf')) or -float('inf'))
-        elif comparison_type == "worse_performance":
-            winner = min(all_data.values(), key=lambda x: x.get("change_percent", float('inf')) or float('inf'))
-        elif comparison_type == "higher_volume":
-            winner = max(all_data.values(), key=lambda x: x.get("volume", 0) or 0)
-        else:
+        # Map comparison type to required field
+        field_map = {
+            "higher_price": "close",
+            "lower_price": "close",
+            "better_performance": "change_percent",
+            "worse_performance": "change_percent",
+            "higher_volume": "volume",
+        }
+
+        field = field_map.get(comparison_type)
+        if field is None:
             return GroundTruthResult.fail(f"Unknown comparison type: {comparison_type}")
+
+        # Validate all instruments have the required field (explicit None check)
+        for name, data in all_data.items():
+            val = data.get(field)
+            if val is None:
+                return GroundTruthResult.system_error(
+                    f"Missing '{field}' for {name} (data collected but field is None)"
+                )
+
+        # Determine winner based on comparison type
+        use_max = comparison_type in ("higher_price", "better_performance", "higher_volume")
+        selector = max if use_max else min
+        winner = selector(all_data.values(), key=lambda x: x[field])
 
         return GroundTruthResult.ok(winner["name"])
 

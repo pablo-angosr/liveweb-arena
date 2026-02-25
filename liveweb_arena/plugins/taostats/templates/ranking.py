@@ -134,19 +134,23 @@ class RankingTemplate(QuestionTemplate):
         # Build and sort subnet list (exclude "Unknown" named subnets for meaningful ranking)
         subnet_list = []
         for netuid, data in subnets_data.items():
-            price = float(data.get("price", 0) or 0)
-            tao_in = float(data.get("tao_in", 0) or 0)
             name = data.get("name", "")
 
             # Skip subnets without meaningful names
             if not name or name.lower() == "unknown":
                 continue
 
+            # Skip subnets with None values for ranking fields
+            raw_price = data.get("price")
+            raw_tao_in = data.get("tao_in")
+            if raw_price is None or raw_tao_in is None:
+                continue
+
             subnet_list.append({
                 "netuid": netuid,
                 "name": name,
-                "price": price,
-                "tao_staked": tao_in,
+                "price": float(raw_price),
+                "tao_staked": float(raw_tao_in),
             })
 
         # Sort by the relevant metric

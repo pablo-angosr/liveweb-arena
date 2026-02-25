@@ -144,12 +144,12 @@ class PercentageTemplate(QuestionTemplate):
             if not name or name.lower() == "unknown":
                 continue
 
-            total_count += 1
-
-            value = data.get(field, 0)
+            value = data.get(field)
             if value is None:
-                value = 0
+                continue
             value = float(value)
+
+            total_count += 1
 
             match = False
             if operator == ">":

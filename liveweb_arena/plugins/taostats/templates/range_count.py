@@ -122,9 +122,9 @@ class RangeCountTemplate(QuestionTemplate):
             if not name or name.lower() == "unknown":
                 continue
 
-            value = data.get(field, 0)
+            value = data.get(field)
             if value is None:
-                value = 0
+                continue
             value = float(value)
 
             # Check if value is within range (inclusive)

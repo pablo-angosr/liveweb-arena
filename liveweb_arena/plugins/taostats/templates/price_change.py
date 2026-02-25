@@ -139,9 +139,9 @@ class PriceChangeTemplate(QuestionTemplate):
             if not name or name.lower() == "unknown":
                 continue
 
-            change = data.get(timeframe_field, 0)
+            change = data.get(timeframe_field)
             if change is None:
-                change = 0
+                continue
 
             subnet_list.append({
                 "netuid": netuid,

@@ -30,7 +30,7 @@ Actual Answer (Agent Response): {actual}
 General Rules:
 1. Be flexible with format differences (e.g., "28°C" = "28 degrees" = "28")
 2. If agent says data unavailable but expected has a value: score 0.0
-3. Output ONLY a JSON object: {{"score": <0.0 or 1.0>, "reasoning": "<brief max 30 words>"}}
+3. Output ONLY a JSON object: {{"score": <float 0.0 to 1.0>, "reasoning": "<brief max 30 words>"}}
 """
 
 # Default task-specific rules (used when template doesn't provide any)

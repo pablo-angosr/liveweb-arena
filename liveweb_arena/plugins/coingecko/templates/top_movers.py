@@ -7,7 +7,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult
 )
 from liveweb_arena.core.gt_collector import GTSourceType
 from ..api_client import CoinGeckoClient
@@ -29,7 +29,7 @@ class CoinGeckoTopMoversTemplate(QuestionTemplate):
     - What is the #1 top gainer on CoinGecko right now?
     """
 
-    GT_SOURCE = GTSourceType.API_ONLY  # Requires sorting homepage coins (~39)
+    GT_SOURCE = GTSourceType.PAGE_ONLY  # Uses coins collected from page visits
 
     GAINER_PATTERNS = [
         "Among the major cryptocurrencies on CoinGecko homepage, which one gained the most in the last 24 hours?",
@@ -100,7 +100,7 @@ class CoinGeckoTopMoversTemplate(QuestionTemplate):
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Get top gainer/loser from collected API data (no network fallback)."""
-        query_type = validation_info.get("query_type", "gainer")
+        query_type = validation_info["query_type"]
 
         from liveweb_arena.core.gt_collector import get_current_gt_collector
         gt_collector = get_current_gt_collector()
@@ -120,6 +120,12 @@ class CoinGeckoTopMoversTemplate(QuestionTemplate):
         if not valid_coins:
             return GroundTruthResult.fail("No valid coins with 24h change data in collected")
 
+        if len(valid_coins) < 10:
+            return GroundTruthResult.fail(
+                f"Only {len(valid_coins)} coins collected (need at least 10 for reliable top mover). "
+                f"Agent should visit CoinGecko homepage to see all coins."
+            )
+
         # Sort by 24h change (all coins guaranteed to have the field by filter above)
         if query_type == "gainer":
             sorted_coins = sorted(
@@ -135,7 +141,9 @@ class CoinGeckoTopMoversTemplate(QuestionTemplate):
             )
 
         top_coin = sorted_coins[0]
-        name = top_coin.get("name", "Unknown")
+        name = top_coin.get("name")
+        if not name:
+            return GroundTruthResult.system_error("Top coin missing 'name' field")
         change = top_coin["price_change_percentage_24h"]
 
         if query_type == "gainer":
@@ -243,7 +251,7 @@ class CoinGeckoTopMoversTemplate(QuestionTemplate):
             domains=["coingecko.com"],
             url_contains="gainer",  # Matches gainers-losers page
         )
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.FIRST)
+        return TriggerConfig(trigger=trigger)
 
     @classmethod
     def get_cache_source(cls) -> str:

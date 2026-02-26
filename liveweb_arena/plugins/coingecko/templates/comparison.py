@@ -7,7 +7,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult
 )
 from liveweb_arena.core.gt_collector import GTSourceType
 from .price import CoinVariable, CoinSpec
@@ -102,14 +102,11 @@ class CoinGeckoComparisonTemplate(QuestionTemplate):
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Get comparison data from collected API data (no network fallback)."""
-        coin1_id = validation_info.get("coin1_id", "")
-        coin2_id = validation_info.get("coin2_id", "")
-        coin1_name = validation_info.get("coin1_name", "")
-        coin2_name = validation_info.get("coin2_name", "")
-        comp_type = validation_info.get("comparison_type", "price")
-
-        if not coin1_id or not coin2_id:
-            return GroundTruthResult.fail("Missing coin IDs")
+        coin1_id = validation_info["coin1_id"]
+        coin2_id = validation_info["coin2_id"]
+        coin1_name = validation_info["coin1_name"]
+        coin2_name = validation_info["coin2_name"]
+        comp_type = validation_info["comparison_type"]
 
         from liveweb_arena.core.gt_collector import get_current_gt_collector
         gt_collector = get_current_gt_collector()
@@ -152,7 +149,9 @@ class CoinGeckoComparisonTemplate(QuestionTemplate):
             if val1 is None or val2 is None:
                 return GroundTruthResult.fail(f"Missing volume data: {coin1_name}={val1}, {coin2_name}={val2}")
 
-        if val1 > val2:
+        if val1 == val2:
+            return GroundTruthResult.ok(f"TIE: {coin1_name} and {coin2_name} (both ${val1:,.2f})")
+        elif val1 > val2:
             return GroundTruthResult.ok(f"{coin1_name} (${val1:,.2f} vs ${val2:,.2f})")
         else:
             return GroundTruthResult.ok(f"{coin2_name} (${val2:,.2f} vs ${val1:,.2f})")
@@ -175,12 +174,24 @@ class CoinGeckoComparisonTemplate(QuestionTemplate):
             )
 
         ground_truth = result.value
-        coin1_name = validation_info.get("coin1_name", "").lower()
-        coin2_name = validation_info.get("coin2_name", "").lower()
+        coin1_name = validation_info["coin1_name"].lower()
+        coin2_name = validation_info["coin2_name"].lower()
+        answer_lower = answer.lower()
+
+        # Handle tie: either coin name is acceptable
+        if ground_truth.startswith("TIE:"):
+            if coin1_name in answer_lower or coin2_name in answer_lower:
+                return ValidationResult(
+                    score=1.0, is_correct=True, expected=ground_truth,
+                    actual=answer, details="Tie - either answer accepted",
+                )
+            return ValidationResult(
+                score=0.0, is_correct=False, expected=ground_truth,
+                actual=answer, details="Tie but neither coin mentioned",
+            )
 
         # Extract winner from ground truth
         winner = ground_truth.split(" (")[0].lower()
-        answer_lower = answer.lower()
 
         # Check if answer mentions the correct coin
         if winner in answer_lower:
@@ -248,7 +259,7 @@ class CoinGeckoComparisonTemplate(QuestionTemplate):
             domains=["coingecko.com"],
             url_contains=coin2_id if coin2_id else None,
         )
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.FIRST)
+        return TriggerConfig(trigger=trigger)
 
     @classmethod
     def get_cache_source(cls) -> str:

@@ -12,7 +12,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult
 )
 from liveweb_arena.core.gt_collector import GTSourceType, get_current_gt_collector
 
@@ -140,7 +140,6 @@ class MultiConditionTemplate(QuestionTemplate):
 
             change_24h = float(raw_24h)
             change_1w = float(raw_1w)
-            emission = float(raw_emission) if raw_emission is not None else 0.0
 
             match = False
             if condition_type == "positive_24h_negative_1w":
@@ -152,6 +151,9 @@ class MultiConditionTemplate(QuestionTemplate):
             elif condition_type == "both_negative":
                 match = change_24h < 0 and change_1w < 0
             elif condition_type == "high_emission_negative":
+                if raw_emission is None:
+                    continue  # Cannot evaluate without emission data
+                emission = float(raw_emission)
                 match = emission > 2 and change_24h < 0
 
             if match:
@@ -215,7 +217,7 @@ class MultiConditionTemplate(QuestionTemplate):
 
     def get_ground_truth_trigger(self, validation_info: dict) -> TriggerConfig:
         trigger = UrlPatternTrigger(domains=["taostats.io"])
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.LAST)
+        return TriggerConfig(trigger=trigger)
 
     @classmethod
     def get_cache_source(cls) -> str:

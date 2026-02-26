@@ -1,5 +1,6 @@
 """Task manager for generating composite tasks"""
 
+import hashlib
 import random
 from typing import Dict, List, Optional, Type
 
@@ -88,8 +89,9 @@ class TaskManager:
 
         for i, (plugin_name, template_name, variant) in enumerate(selected_templates):
             plugin = self._get_plugin(plugin_name)
-            # Derive seed for this sub-task
-            subtask_seed = seed + i * 1000
+            # Derive seed for this sub-task (hash-based to avoid collisions)
+            hash_input = f"{seed}:{i}".encode()
+            subtask_seed = int(hashlib.sha256(hash_input).hexdigest()[:8], 16)
             subtask = await plugin.generate_task(
                 subtask_seed,
                 template_name=template_name,
@@ -99,10 +101,10 @@ class TaskManager:
             subtask.answer_tag = f"answer{i + 1}"
             subtasks.append(subtask)
 
-        # Always include ALL plugin hints (not just selected ones)
-        # This ensures agent knows about all available data sources
+        # Include hints only for plugins used in the task
+        # Avoids eagerly instantiating unused plugins (which may trigger API calls)
         plugin_hints: Dict[str, str] = {}
-        for plugin_name in self._plugin_classes.keys():
+        for plugin_name in plugins_to_use:
             plugin = self._get_plugin(plugin_name)
             plugin_hints[plugin_name] = plugin.usage_hint
 

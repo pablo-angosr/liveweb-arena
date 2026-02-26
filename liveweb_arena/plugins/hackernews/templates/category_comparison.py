@@ -17,7 +17,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult
 )
 from liveweb_arena.core.gt_collector import GTSourceType, get_current_gt_collector
 
@@ -272,6 +272,8 @@ class HackerNewsCategoryComparisonTemplate(QuestionTemplate):
                     f"Agent needs to visit both category pages and story details."
                 )
 
+            if sum1 == sum2:
+                return GroundTruthResult.ok(f"TIE: {cat1_name} and {cat2_name} (both {sum1})")
             return GroundTruthResult.ok(cat1_name if sum1 > sum2 else cat2_name)
 
         # For single-rank comparisons
@@ -291,6 +293,8 @@ class HackerNewsCategoryComparisonTemplate(QuestionTemplate):
             )
 
         if mode == "which_higher":
+            if val1 == val2:
+                return GroundTruthResult.ok(f"TIE: {cat1_name} and {cat2_name} (both {val1})")
             return GroundTruthResult.ok(cat1_name if val1 > val2 else cat2_name)
         else:  # difference
             diff = val1 - val2
@@ -319,6 +323,18 @@ class HackerNewsCategoryComparisonTemplate(QuestionTemplate):
         answer_lower = answer.lower()
 
         if mode in ("which_higher", "sum_compare"):
+            # Handle tie: either category name is acceptable
+            if expected.startswith("TIE:"):
+                if cat1_name.lower() in answer_lower or cat2_name.lower() in answer_lower:
+                    return ValidationResult(
+                        score=1.0, is_correct=True, expected=expected,
+                        actual=answer, details="Tie - either answer accepted",
+                    )
+                return ValidationResult(
+                    score=0.0, is_correct=False, expected=expected,
+                    actual=answer, details="Tie but neither category mentioned",
+                )
+
             # Check if correct category is mentioned
             expected_lower = expected.lower()
             if expected_lower in answer_lower:
@@ -396,7 +412,7 @@ class HackerNewsCategoryComparisonTemplate(QuestionTemplate):
     def get_ground_truth_trigger(self, validation_info: dict) -> TriggerConfig:
         """Trigger on HN domain visits."""
         trigger = UrlPatternTrigger(domains=["news.ycombinator.com"])
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.LAST)
+        return TriggerConfig(trigger=trigger)
 
     @classmethod
     def get_cache_source(cls) -> str:

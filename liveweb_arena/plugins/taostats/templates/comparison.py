@@ -8,7 +8,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult
 )
 from liveweb_arena.core.gt_collector import GTSourceType, get_current_gt_collector
 from .variables import _fetch_active_subnet_ids, _fetch_subnet_name
@@ -181,7 +181,9 @@ class ComparisonTemplate(QuestionTemplate):
         val1 = float(raw1)
         val2 = float(raw2)
 
-        # Return name of subnet with higher value
+        # Return name of subnet with higher value (handle ties)
+        if val1 == val2:
+            return GroundTruthResult.ok(f"TIE: {name1} and {name2} (both {val1})")
         return GroundTruthResult.ok(name1 if val1 > val2 else name2)
 
     async def validate_answer(
@@ -204,6 +206,18 @@ class ComparisonTemplate(QuestionTemplate):
         name2 = validation_info.get("subnet2_name", "")
         answer_lower = answer.lower()
 
+        # Handle tie: either subnet name is acceptable
+        if ground_truth.startswith("TIE:"):
+            if name1.lower() in answer_lower or name2.lower() in answer_lower:
+                return ValidationResult(
+                    score=1.0, is_correct=True, expected=ground_truth,
+                    actual=answer, details="Tie - either answer accepted",
+                )
+            return ValidationResult(
+                score=0.0, is_correct=False, expected=ground_truth,
+                actual=answer, details="Tie but neither subnet mentioned",
+            )
+
         # Check if correct subnet is mentioned
         if ground_truth.lower() in answer_lower:
             return ValidationResult(
@@ -225,7 +239,7 @@ class ComparisonTemplate(QuestionTemplate):
     def get_ground_truth_trigger(self, validation_info: dict) -> tuple:
         """Comparison: LAST for multi-page browsing."""
         trigger = UrlPatternTrigger(domains=["taostats.io"])
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.LAST)
+        return TriggerConfig(trigger=trigger)
 
     @classmethod
     def get_cache_source(cls) -> str:

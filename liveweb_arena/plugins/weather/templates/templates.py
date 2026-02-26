@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from liveweb_arena.core.validators.base import QuestionTemplate, GeneratedQuestion, ValidationResult, register_template
 from liveweb_arena.core.validators.validators import NumericToleranceValidator, BooleanValidator, ExactMatchValidator
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult,
 )
 from .variables import (
     LocationVariable, DateVariable, WeatherMetricVariable,
@@ -414,7 +414,7 @@ class LocationNameWeatherTemplate(QuestionTemplate):
             domains=["wttr.in"],
             url_contains=city_name if city_name else None,
         )
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.FIRST)
+        return TriggerConfig(trigger=trigger)
 
     # === Cache Registration Methods ===
     # These methods make the template self-contained for caching.
@@ -691,7 +691,7 @@ class CurrentWeatherTemplate(QuestionTemplate):
             domains=["wttr.in"],
             url_contains=city_name if city_name else None,
         )
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.FIRST)
+        return TriggerConfig(trigger=trigger)
 
     def get_gt_source(self):
         """Current weather template uses PAGE_ONLY extraction."""
@@ -1017,7 +1017,7 @@ class MultiDayWeatherTemplate(QuestionTemplate):
             domains=["wttr.in"],
             url_contains=city_name if city_name else None,
         )
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.FIRST)
+        return TriggerConfig(trigger=trigger)
 
     def get_gt_source(self):
         """Multi-day weather template uses PAGE_ONLY extraction."""

@@ -8,7 +8,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult,
 )
 from liveweb_arena.core.gt_collector import GTSourceType
 from ..utils import get_crypto_24h_change, get_stooq_24h_change
@@ -357,9 +357,9 @@ class HybridAnomalyDetectionTemplate(QuestionTemplate):
         if anomalies_str.lower() == "none":
             return []
 
-        # Extract names before the parentheses
-        names = re.findall(r"(\w+)\s*\(", anomalies_str)
-        return names
+        # Extract names before the parentheses (supports multi-word names)
+        names = re.findall(r"([^;(]+?)\s*\(", anomalies_str)
+        return [n.strip() for n in names if n.strip()]
 
     def _parse_reported_anomalies(self, answer: str, valid_names: List[str]) -> set:
         """Extract anomaly names reported by agent."""
@@ -417,7 +417,7 @@ class HybridAnomalyDetectionTemplate(QuestionTemplate):
     ) -> TriggerConfig:
         """Trigger on Stooq visit (cross-site task)."""
         trigger = UrlPatternTrigger(domains=["stooq.com"])
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.FIRST)
+        return TriggerConfig(trigger=trigger)
 
     @classmethod
     def get_cache_source(cls) -> str:

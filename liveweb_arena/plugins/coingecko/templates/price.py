@@ -10,7 +10,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult
 )
 from ..api_client import CoinGeckoClient
 
@@ -242,11 +242,8 @@ class CoinGeckoPriceTemplate(QuestionTemplate):
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Get price data from collected API data (no network fallback)."""
-        coin_id = validation_info.get("coin_id", "")
-        metric_type = validation_info.get("metric_type", "current_price")
-
-        if not coin_id:
-            return GroundTruthResult.fail("No coin_id provided")
+        coin_id = validation_info["coin_id"]
+        metric_type = validation_info["metric_type"]
 
         # Get data from collected API data only (no network fallback)
         coin_data = None
@@ -316,8 +313,8 @@ class CoinGeckoPriceTemplate(QuestionTemplate):
             )
 
         ground_truth = result.value
-        metric_type = validation_info.get("metric_type", "current_price")
-        is_percentage = validation_info.get("is_percentage", False)
+        metric_type = validation_info["metric_type"]
+        is_percentage = validation_info["is_percentage"]
 
         if is_percentage:
             return self._validate_percentage(answer, ground_truth)
@@ -370,6 +367,17 @@ class CoinGeckoPriceTemplate(QuestionTemplate):
                 expected=expected,
                 actual=answer,
                 details="Could not parse numeric values",
+            )
+
+        if expected_val == 0:
+            if actual_val == 0:
+                return ValidationResult(
+                    score=1.0, is_correct=True, expected=expected,
+                    actual=answer, details="Both values are zero (exact match)",
+                )
+            return ValidationResult(
+                score=0.0, is_correct=False, expected=expected,
+                actual=answer, details=f"Expected zero, got {actual_val}",
             )
 
         diff_pct = abs(actual_val - expected_val) / expected_val * 100
@@ -457,6 +465,17 @@ class CoinGeckoPriceTemplate(QuestionTemplate):
                 actual=answer, details="Could not parse market cap values",
             )
 
+        if expected_val == 0:
+            if actual_val == 0:
+                return ValidationResult(
+                    score=1.0, is_correct=True, expected=expected,
+                    actual=answer, details="Both values are zero (exact match)",
+                )
+            return ValidationResult(
+                score=0.0, is_correct=False, expected=expected,
+                actual=answer, details=f"Expected zero, got {actual_val}",
+            )
+
         diff_pct = abs(actual_val - expected_val) / expected_val * 100
 
         if diff_pct <= 5:
@@ -484,7 +503,7 @@ class CoinGeckoPriceTemplate(QuestionTemplate):
             domains=["coingecko.com", "api.coingecko.com"],
             url_contains=coin_id if coin_id else None,
         )
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.FIRST)
+        return TriggerConfig(trigger=trigger)
 
     # === Cache Registration Methods ===
     # These methods make the template self-contained for caching.

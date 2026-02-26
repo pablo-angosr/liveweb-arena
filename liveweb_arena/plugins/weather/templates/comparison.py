@@ -7,7 +7,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult
 )
 from liveweb_arena.core.gt_collector import GTSourceType
 from .variables import LocationVariable, LocationSpec, LocationType
@@ -229,7 +229,7 @@ class WeatherComparisonTemplate(QuestionTemplate):
             domains=["wttr.in"],
             url_contains=city2_query.replace("+", " ").split(",")[0] if city2_query else None,
         )
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.FIRST)
+        return TriggerConfig(trigger=trigger)
 
     @classmethod
     def get_cache_source(cls) -> str:

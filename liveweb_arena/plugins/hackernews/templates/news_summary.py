@@ -22,7 +22,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, TriggerConfig, FetchStrategy, GroundTruthResult
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult
 )
 from liveweb_arena.core.gt_collector import GTSourceType, get_current_gt_collector
 
@@ -182,13 +182,18 @@ Calculate weighted total. Output JSON: {{"score": <0.0-1.0>, "reasoning": "<brie
             if not title or rank is None:
                 continue
 
+            score = data.get("score")
+            descendants = data.get("descendants")
+            if score is None or descendants is None:
+                continue  # Skip stories with incomplete data
+
             stories.append({
                 "rank": rank,
                 "title": title,
-                "score": data.get("score", 0),
-                "comments": data.get("descendants", 0),
-                "author": data.get("by", "unknown"),
-                "url": data.get("url", ""),
+                "score": score,
+                "comments": descendants,
+                "author": data.get("by", "unknown"),  # Display-only
+                "url": data.get("url", ""),  # Display-only
             })
 
         # Sort by rank and take top n
@@ -269,7 +274,7 @@ Calculate weighted total. Output JSON: {{"score": <0.0-1.0>, "reasoning": "<brie
     def get_ground_truth_trigger(self, validation_info: Dict[str, Any]) -> TriggerConfig:
         """Trigger on HN domain visits."""
         trigger = UrlPatternTrigger(domains=["news.ycombinator.com"])
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.LAST)
+        return TriggerConfig(trigger=trigger)
 
     @classmethod
     def get_cache_source(cls) -> str:

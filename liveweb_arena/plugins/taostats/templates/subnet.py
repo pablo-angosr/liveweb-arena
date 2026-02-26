@@ -8,7 +8,7 @@ from liveweb_arena.core.validators.base import (
 )
 from liveweb_arena.core.validators.validators import NumericToleranceValidator, ExactMatchValidator
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult
 )
 from liveweb_arena.core.gt_collector import GTSourceType, get_current_gt_collector
 from .variables import SubnetVariable, MetricVariable, SubnetSpec, MetricSpec, SubnetMetric
@@ -208,7 +208,6 @@ class SubnetInfoTemplate(QuestionTemplate):
                 domains=["taostats.io"],
                 url_contains=url_pattern,
             ),
-            strategy=FetchStrategy.FIRST,
         )
 
     @classmethod

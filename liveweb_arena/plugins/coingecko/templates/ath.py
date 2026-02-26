@@ -8,7 +8,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult
 )
 from .price import CoinVariable
 from ..api_client import CoinGeckoClient
@@ -286,7 +286,7 @@ class CoinGeckoATHTemplate(QuestionTemplate):
             domains=["coingecko.com"],
             url_contains=coin_id if coin_id else None,
         )
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.FIRST)
+        return TriggerConfig(trigger=trigger)
 
     @classmethod
     def get_cache_source(cls) -> str:

@@ -8,7 +8,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult,
 )
 from .variables import CURRENCIES, CurrencySpec
 
@@ -284,7 +284,7 @@ The agent must:
             domains=["stooq.com"],
             url_contains=symbol if symbol else None,
         )
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.FIRST)
+        return TriggerConfig(trigger=trigger)
 
     @classmethod
     def get_cache_source(cls) -> str:

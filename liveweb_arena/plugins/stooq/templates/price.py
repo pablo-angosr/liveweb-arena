@@ -7,7 +7,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult,
 )
 from liveweb_arena.plugins.stooq.api_client import StooqClient
 from .variables import (
@@ -342,7 +342,7 @@ class StooqPriceTemplate(QuestionTemplate):
             domains=["stooq.com"],
             url_contains=symbol if symbol else None,
         )
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.FIRST)
+        return TriggerConfig(trigger=trigger)
 
     # === Cache Registration Methods ===
     # These methods make the template self-contained for caching.

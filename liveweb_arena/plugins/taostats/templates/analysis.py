@@ -8,7 +8,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult
 )
 from liveweb_arena.core.gt_collector import GTSourceType, get_current_gt_collector
 from .variables import _fetch_active_subnet_ids, _fetch_subnet_name
@@ -247,7 +247,7 @@ class AnalysisTemplate(QuestionTemplate):
 
     def get_ground_truth_trigger(self, validation_info: dict) -> tuple:
         trigger = UrlPatternTrigger(domains=["taostats.io"])
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.LAST)
+        return TriggerConfig(trigger=trigger)
 
     @classmethod
     def get_cache_source(cls) -> str:

@@ -8,7 +8,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult,
 )
 from liveweb_arena.core.gt_collector import GTSourceType
 from ..utils import get_stooq_price, get_stooq_24h_change
@@ -202,7 +202,10 @@ Score: 1.0 for correct asset + value"""
                 if isinstance(data, dict) and "current_condition" in data:
                     try:
                         current = data["current_condition"][0]
-                        temp = int(current.get("temp_C", 0))
+                        raw_temp = current.get("temp_C")
+                        if raw_temp is None:
+                            continue  # Temperature not available in collected data
+                        temp = int(raw_temp)
                         key_lower = key.lower().replace("+", " ")
 
                         if city_a["name"].lower() in key_lower or city_a["query"].lower().replace("+", " ") in key_lower:
@@ -331,15 +334,43 @@ Score: 1.0 for correct asset + value"""
                 details=f"Wrong branch: {all_assets[mentioned_branch]} vs expected {expected_name}",
             )
 
-        # Correct asset - check value
+        # Correct asset - check value accuracy
         value_match = re.search(r"\$?([\d,]+\.?\d*)\s*%?", answer.replace(",", ""))
-        if value_match:
+        gt_value_match = re.search(r":\s*\$?([\d,.]+)\s*%?", ground_truth)
+
+        if value_match and gt_value_match:
+            actual_val = float(value_match.group(1).replace(",", ""))
+            gt_val = float(gt_value_match.group(1).replace(",", ""))
+
+            if gt_val == 0:
+                pct_diff = 0.0 if actual_val == 0 else 100.0
+            else:
+                pct_diff = abs(actual_val - gt_val) / abs(gt_val) * 100
+
+            if pct_diff <= 10:
+                return ValidationResult(
+                    score=1.0,
+                    is_correct=True,
+                    expected=ground_truth,
+                    actual=answer,
+                    details=f"Correct asset and value (diff: {pct_diff:.1f}%)",
+                )
+            else:
+                return ValidationResult(
+                    score=0.5,
+                    is_correct=False,
+                    expected=ground_truth,
+                    actual=answer,
+                    details=f"Correct asset but value off by {pct_diff:.1f}%",
+                )
+        elif value_match:
+            # Has a number but couldn't parse GT value — give credit for correct asset
             return ValidationResult(
-                score=1.0,
-                is_correct=True,
+                score=0.5,
+                is_correct=False,
                 expected=ground_truth,
                 actual=answer,
-                details="Correct asset and value found",
+                details="Correct asset, value present but could not verify",
             )
 
         return ValidationResult(
@@ -356,7 +387,7 @@ Score: 1.0 for correct asset + value"""
     ) -> TriggerConfig:
         """Trigger on Stooq visit."""
         trigger = UrlPatternTrigger(domains=["stooq.com"])
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.FIRST)
+        return TriggerConfig(trigger=trigger)
 
     @classmethod
     def get_cache_source(cls) -> str:

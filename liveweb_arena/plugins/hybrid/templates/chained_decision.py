@@ -8,7 +8,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult,
 )
 from liveweb_arena.core.gt_collector import GTSourceType
 from ..utils import get_crypto_24h_change, get_stooq_price, get_stooq_24h_change
@@ -367,7 +367,7 @@ Score: 1.0 for correct path + value, 0.5 for correct path only"""
     ) -> TriggerConfig:
         """Trigger on Stooq visit."""
         trigger = UrlPatternTrigger(domains=["stooq.com"])
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.FIRST)
+        return TriggerConfig(trigger=trigger)
 
     @classmethod
     def get_cache_source(cls) -> str:

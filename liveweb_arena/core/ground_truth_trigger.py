@@ -137,14 +137,12 @@ class TriggerConfig:
     """
     Configuration for ground truth triggering.
 
-    Note: strategy is deprecated and ignored. The GT system now always:
+    The GT system always:
     - Extracts from pages in real-time (newer overwrites older)
     - Fetches API data at end of trajectory
     """
 
     trigger: "GroundTruthTrigger"
-    strategy: FetchStrategy = FetchStrategy.FIRST  # Deprecated, ignored
-    min_fetch_interval: float = 120.0  # Deprecated, ignored
 
 
 class GroundTruthTrigger(ABC):

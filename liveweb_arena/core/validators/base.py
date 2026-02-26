@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Callable, Type, TYPE_CHECKING, Uni
 import random
 
 if TYPE_CHECKING:
-    from ..ground_truth_trigger import GroundTruthTrigger, FetchStrategy, GroundTruthResult
+    from ..ground_truth_trigger import GroundTruthTrigger, GroundTruthResult
     from ..gt_collector import GTSourceType
 
 
@@ -283,9 +283,7 @@ class QuestionTemplate(ABC):
             validation_info: Information about the question
 
         Returns:
-            Tuple of (GroundTruthTrigger, FetchStrategy)
-            - GroundTruthTrigger: When to fetch
-            - FetchStrategy: FIRST, LAST, or ALL
+            TriggerConfig with trigger condition, or None (default).
 
         Default: Returns None, meaning ground truth is fetched at start
         (legacy behavior for templates that don't implement this)

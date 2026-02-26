@@ -9,7 +9,7 @@ from liveweb_arena.core.validators.base import (
     QuestionTemplate, GeneratedQuestion, ValidationResult, register_template,
 )
 from liveweb_arena.core.ground_truth_trigger import (
-    UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult,
+    UrlPatternTrigger, TriggerConfig, GroundTruthResult,
 )
 from liveweb_arena.core.gt_collector import GTSourceType
 
@@ -510,8 +510,6 @@ The agent MUST report individual percentage changes for verification."""
         """
         return TriggerConfig(
             trigger=UrlPatternTrigger(domains=["stooq.com"]),
-            strategy=FetchStrategy.ALL,
-            min_fetch_interval=60.0,
         )
 
     @classmethod

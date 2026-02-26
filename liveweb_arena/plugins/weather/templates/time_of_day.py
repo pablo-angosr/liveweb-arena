@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 
 from liveweb_arena.core.validators.base import QuestionTemplate, GeneratedQuestion, ValidationResult, register_template
 from liveweb_arena.core.validators.validators import NumericToleranceValidator
-from liveweb_arena.core.ground_truth_trigger import UrlPatternTrigger, FetchStrategy, TriggerConfig, GroundTruthResult
+from liveweb_arena.core.ground_truth_trigger import UrlPatternTrigger, TriggerConfig, GroundTruthResult
 from .variables import (
     LocationVariable, DateVariable, WeatherMetricVariable, TimeOfDayVariable,
     LocationType, MetricType, DateType,
@@ -235,7 +235,7 @@ class TimeOfDayWeatherTemplate(QuestionTemplate):
             domains=["wttr.in"],
             url_contains=city_name if city_name else None,
         )
-        return TriggerConfig(trigger=trigger, strategy=FetchStrategy.FIRST)
+        return TriggerConfig(trigger=trigger)
 
     @classmethod
     def get_cache_source(cls) -> str:

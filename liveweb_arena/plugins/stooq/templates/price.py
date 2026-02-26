@@ -174,10 +174,8 @@ class StooqPriceTemplate(QuestionTemplate):
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Get ground truth from collected API data (no network fallback)."""
-        symbol = validation_info.get("symbol", "")
-        metric = validation_info.get("metric", "last_price")
-        if not symbol:
-            return GroundTruthResult.fail("No symbol provided")
+        symbol = validation_info["symbol"]
+        metric = validation_info["metric"]
 
         from liveweb_arena.core.gt_collector import get_current_gt_collector
         gt_collector = get_current_gt_collector()

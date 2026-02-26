@@ -160,7 +160,7 @@ class HybridAnomalyDetectionTemplate(QuestionTemplate):
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch all changes and compute anomalies."""
-        assets = validation_info.get("assets", [])
+        assets = validation_info["assets"]
         if not assets:
             return GroundTruthResult.fail("No assets provided")
 
@@ -279,7 +279,7 @@ class HybridAnomalyDetectionTemplate(QuestionTemplate):
         gt_anomaly_names = set(a.lower() for a in gt_anomalies)
 
         # Parse agent's claimed anomalies
-        asset_names = [a.lower() for a in validation_info.get("asset_names", [])]
+        asset_names = [a.lower() for a in validation_info["asset_names"]]
         reported_anomalies = self._parse_reported_anomalies(answer_lower, asset_names)
 
         # Calculate F1 score

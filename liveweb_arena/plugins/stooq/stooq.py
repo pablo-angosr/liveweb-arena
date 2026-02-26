@@ -57,7 +57,9 @@ class StooqPlugin(BasePlugin):
         symbol = self._extract_symbol(url)
         if symbol:
             data = await fetch_single_asset_data(symbol)
-            return data if data else {}
+            if not data:
+                raise ValueError(f"Stooq API returned no data for symbol={symbol}")
+            return data
 
         # Homepage - return all assets
         if self._is_homepage(url):

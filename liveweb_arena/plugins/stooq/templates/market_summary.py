@@ -191,8 +191,8 @@ Key validation points:
 
         Returns GroundTruthResult with string like: "Market direction: UP. Data: aapl.us: 255.53 (+1.04%), ..."
         """
-        symbols = validation_info.get("symbols", [])
-        summary_type = validation_info.get("summary_type", "us_indices")
+        symbols = validation_info["symbols"]
+        summary_type = validation_info["summary_type"]
 
         if not symbols:
             return GroundTruthResult.fail("No symbols provided")

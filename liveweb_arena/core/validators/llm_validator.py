@@ -159,17 +159,20 @@ class LLMValidator:
         score_match = re.search(r'"?score"?\s*:\s*([0-9.]+)', response)
         reasoning_match = re.search(r'"?reasoning"?\s*:\s*"([^"]+)"', response)
 
-        score = float(score_match.group(1)) if score_match else 0.0
-        reasoning = reasoning_match.group(1) if reasoning_match else "Could not parse LLM response"
+        if not score_match:
+            raise ValueError(f"Cannot parse LLM validation response: {response[:200]}")
+
+        score = float(score_match.group(1))
+        reasoning = reasoning_match.group(1) if reasoning_match else "Score extracted but reasoning unparseable"
 
         return {"score": min(1.0, max(0.0, score)), "reasoning": reasoning}
 
     def _validate_result(self, data: dict) -> dict:
         """Validate and normalize parsed result"""
-        score = float(data.get("score", 0.0))
+        score = float(data["score"])
         score = min(1.0, max(0.0, score))  # Clamp to [0, 1]
 
-        reasoning = str(data.get("reasoning", "No reasoning provided"))
+        reasoning = str(data["reasoning"])
         # Truncate reasoning to ~50 words
         words = reasoning.split()
         if len(words) > 50:

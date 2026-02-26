@@ -306,8 +306,8 @@ The agent MUST report individual percentage changes for verification."""
         self, validation_info: Dict[str, Any]
     ) -> GroundTruthResult:
         """Fetch ground truth for all instruments"""
-        group1 = validation_info.get("group1_instruments", [])
-        group2 = validation_info.get("group2_instruments", [])
+        group1 = validation_info["group1_instruments"]
+        group2 = validation_info["group2_instruments"]
 
         result = {
             "group1_data": {},
@@ -418,8 +418,8 @@ The agent MUST report individual percentage changes for verification."""
         ground_truth_data = gt_result.value
         ground_truth_str = gt_str_result.value if gt_str_result.success else None
 
-        names1 = validation_info.get("group1_names", [])
-        names2 = validation_info.get("group2_names", [])
+        names1 = validation_info["group1_names"]
+        names2 = validation_info["group2_names"]
 
         # Extract reported values from answer
         reported1 = self._extract_reported_values(answer, names1)

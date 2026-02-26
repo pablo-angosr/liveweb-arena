@@ -161,7 +161,7 @@ class HybridPortfolioRebalanceTemplate(QuestionTemplate):
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Fetch all asset performances and compute recommendations."""
-        assets = validation_info.get("assets", [])
+        assets = validation_info["assets"]
         if not assets:
             return GroundTruthResult.fail("No assets provided")
 

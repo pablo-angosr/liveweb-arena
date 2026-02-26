@@ -313,7 +313,9 @@ class LocationNameWeatherTemplate(QuestionTemplate):
             return GroundTruthResult.ok(value) if value is not None else GroundTruthResult.fail("No current data")
 
         # For date-based queries, find day by date (timezone-safe)
-        weather = data.get("weather", [])
+        weather = data.get("weather")
+        if not weather:
+            return GroundTruthResult.fail("No weather data in API response")
         day_data = None
         is_today = False
         for i, day in enumerate(weather):
@@ -326,7 +328,9 @@ class LocationNameWeatherTemplate(QuestionTemplate):
             return GroundTruthResult.fail(f"No forecast data for {target_date}")
 
         display_indices = [3, 4, 6, 7]
-        hourly = day_data.get("hourly", [])
+        hourly = day_data.get("hourly")
+        if not hourly:
+            return GroundTruthResult.fail("No hourly data in weather forecast")
 
         if api_field in ("maxtempC", "mintempC"):
             if hourly and len(hourly) >= 8:
@@ -913,12 +917,16 @@ class MultiDayWeatherTemplate(QuestionTemplate):
                 f"Required URL: https://wttr.in/{url_location}"
             )
 
-        weather = data.get("weather", [])
+        weather = data.get("weather")
+        if not weather:
+            return GroundTruthResult.fail("No weather data in API response")
 
         if is_boolean:
             for i in range(min(num_days, len(weather))):
                 day = weather[i]
-                hourly = day.get("hourly", [])
+                hourly = day.get("hourly")
+                if not hourly:
+                    continue
                 for h in hourly:
                     chance = float(h.get("chanceofrain", 0))
                     if chance > 30:
@@ -931,7 +939,9 @@ class MultiDayWeatherTemplate(QuestionTemplate):
             day_data = weather[i]
             date_str = day_data.get("date", f"Day {i+1}")
             display_indices = [3, 4, 6, 7]
-            hourly = day_data.get("hourly", [])
+            hourly = day_data.get("hourly")
+            if not hourly:
+                continue
 
             if api_field in ("maxtempC", "mintempC"):
                 if hourly and len(hourly) >= 8:

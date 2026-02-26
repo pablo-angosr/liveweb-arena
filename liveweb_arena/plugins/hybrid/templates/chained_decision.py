@@ -210,10 +210,10 @@ Score: 1.0 for correct path + value, 0.5 for correct path only"""
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Navigate decision tree and get correct target."""
-        level1 = validation_info.get("level1_asset", {})
-        level2 = validation_info.get("level2_asset", {})
-        threshold = validation_info.get("threshold", 3.0)
-        targets = validation_info.get("targets", {})
+        level1 = validation_info["level1_asset"]
+        level2 = validation_info["level2_asset"]
+        threshold = validation_info["threshold"]
+        targets = validation_info["targets"]
 
         # Get level 1 condition
         try:
@@ -245,7 +245,7 @@ Score: 1.0 for correct path + value, 0.5 for correct path only"""
             path = f"{level1.get('name')}={level1_change:+.2f}% in neutral zone"
 
         # Get target value
-        target = targets.get(branch, {})
+        target = targets[branch]
         try:
             price = await get_stooq_price(target.get("symbol", ""))
         except Exception as e:
@@ -296,7 +296,7 @@ Score: 1.0 for correct path + value, 0.5 for correct path only"""
         expected_branch = branch_match.group(1)
 
         # Get all target names to check for wrong branch
-        targets = validation_info.get("targets", {})
+        targets = validation_info["targets"]
         all_names = {
             branch: info.get("name", "").lower()
             for branch, info in targets.items()

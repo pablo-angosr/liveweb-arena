@@ -162,9 +162,9 @@ class StooqHistoricalTemplate(QuestionTemplate):
         Uses the 'history' field from collected Stooq data which contains
         the last 30 days of price data.
         """
-        symbol = validation_info.get("symbol", "")
-        query_type = validation_info.get("query_type", "highest_close")
-        num_days = validation_info.get("num_days", 5)
+        symbol = validation_info["symbol"]
+        query_type = validation_info["query_type"]
+        num_days = validation_info["num_days"]
 
         if not symbol:
             return GroundTruthResult.fail("No symbol provided")

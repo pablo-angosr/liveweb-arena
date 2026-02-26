@@ -247,8 +247,8 @@ class HybridConditionalBranchTemplate(QuestionTemplate):
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Determine correct branch and fetch target value."""
-        condition_asset = validation_info.get("condition_asset", {})
-        threshold = validation_info.get("threshold", 2.0)
+        condition_asset = validation_info["condition_asset"]
+        threshold = validation_info["threshold"]
 
         # Step 1: Get condition value (with retry)
         try:
@@ -267,15 +267,15 @@ class HybridConditionalBranchTemplate(QuestionTemplate):
         # Step 2: Determine branch
         if condition_change > threshold:
             branch = BranchType.POSITIVE
-            target = validation_info.get("positive_target", {})
+            target = validation_info["positive_target"]
             value_type = "price"
         elif condition_change < -threshold:
             branch = BranchType.NEGATIVE
-            target = validation_info.get("negative_target", {})
+            target = validation_info["negative_target"]
             value_type = "price"
         else:
             branch = BranchType.NEUTRAL
-            target = validation_info.get("neutral_target", {})
+            target = validation_info["neutral_target"]
             value_type = "change"
 
         # Step 3: Fetch target value (with retry)
@@ -312,8 +312,8 @@ class HybridConditionalBranchTemplate(QuestionTemplate):
         import re
 
         # First, determine the correct branch (even if we can't get target value)
-        condition_asset = validation_info.get("condition_asset", {})
-        threshold = validation_info.get("threshold", 2.0)
+        condition_asset = validation_info["condition_asset"]
+        threshold = validation_info["threshold"]
 
         try:
             condition_change = await get_crypto_24h_change(
@@ -332,22 +332,22 @@ class HybridConditionalBranchTemplate(QuestionTemplate):
         # Determine correct branch
         if condition_change > threshold:
             correct_branch = BranchType.POSITIVE
-            correct_target = validation_info.get("positive_target", {})
+            correct_target = validation_info["positive_target"]
         elif condition_change < -threshold:
             correct_branch = BranchType.NEGATIVE
-            correct_target = validation_info.get("negative_target", {})
+            correct_target = validation_info["negative_target"]
         else:
             correct_branch = BranchType.NEUTRAL
-            correct_target = validation_info.get("neutral_target", {})
+            correct_target = validation_info["neutral_target"]
 
         correct_target_name = correct_target.get("name", "").lower()
         answer_lower = answer.lower()
 
         # Get all targets for wrong-branch detection
         all_targets = {
-            BranchType.POSITIVE: validation_info.get("positive_target", {}),
-            BranchType.NEGATIVE: validation_info.get("negative_target", {}),
-            BranchType.NEUTRAL: validation_info.get("neutral_target", {}),
+            BranchType.POSITIVE: validation_info["positive_target"],
+            BranchType.NEGATIVE: validation_info["negative_target"],
+            BranchType.NEUTRAL: validation_info["neutral_target"],
         }
 
         # Check which target the agent mentioned

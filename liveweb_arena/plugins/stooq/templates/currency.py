@@ -173,11 +173,11 @@ The agent must:
 
         Returns GroundTruthResult with converted amount as string (e.g., "1159.94 USD")
         """
-        symbol = validation_info.get("symbol", "")
-        amount = validation_info.get("amount", 0)
-        direction = validation_info.get("direction", "")
-        base = validation_info.get("base", "")
-        quote = validation_info.get("quote", "")
+        symbol = validation_info["symbol"]
+        amount = validation_info["amount"]
+        direction = validation_info["direction"]
+        base = validation_info["base"]
+        quote = validation_info["quote"]
 
         result = await self._fetch_exchange_rate(symbol)
         if not result.success:

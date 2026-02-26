@@ -79,7 +79,9 @@ class CoinGeckoPlugin(BasePlugin):
         coin_id = self._extract_coin_id(url)
         if coin_id:
             data = await fetch_single_coin_data(coin_id)
-            return data if data else {}
+            if not data:
+                raise ValueError(f"CoinGecko API returned no data for coin_id={coin_id}")
+            return data
 
         # Homepage - return all coins
         if self._is_homepage(url):

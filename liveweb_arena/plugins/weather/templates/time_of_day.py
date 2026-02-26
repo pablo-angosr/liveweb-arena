@@ -174,7 +174,9 @@ class TimeOfDayWeatherTemplate(QuestionTemplate):
         if data is None:
             return GroundTruthResult.fail(f"Weather data for '{location}' not collected")
 
-        weather = data.get("weather", [])
+        weather = data.get("weather")
+        if not weather:
+            return GroundTruthResult.fail("No weather data in API response")
 
         # Find day by date (timezone-safe) instead of using array index
         day_data = None
@@ -186,7 +188,9 @@ class TimeOfDayWeatherTemplate(QuestionTemplate):
         if day_data is None:
             return GroundTruthResult.fail(f"No data for date: {target_date}")
 
-        hourly = day_data.get("hourly", [])
+        hourly = day_data.get("hourly")
+        if not hourly:
+            return GroundTruthResult.fail("No hourly data in weather forecast")
 
         # Average values across the time period
         values = []

@@ -198,8 +198,8 @@ class HybridSatisficingSearchTemplate(QuestionTemplate):
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Find all assets meeting the threshold (for validation)."""
-        assets = validation_info.get("assets", [])
-        threshold = validation_info.get("threshold", 3.0)
+        assets = validation_info["assets"]
+        threshold = validation_info["threshold"]
 
         if not assets:
             return GroundTruthResult.fail("No assets provided")
@@ -280,7 +280,7 @@ class HybridSatisficingSearchTemplate(QuestionTemplate):
 
         ground_truth = result.value
         answer_lower = answer.lower()
-        threshold = validation_info.get("threshold", 3.0)
+        threshold = validation_info["threshold"]
 
         # Check if no qualifying assets exist
         if "Qualifying: [NONE]" in ground_truth:
@@ -324,7 +324,7 @@ class HybridSatisficingSearchTemplate(QuestionTemplate):
             qualifying_assets[name] = change
 
         # Check which asset the agent mentioned
-        asset_names = [a.lower() for a in validation_info.get("asset_names", [])]
+        asset_names = [a.lower() for a in validation_info["asset_names"]]
 
         # Build name variations for matching
         variations = {

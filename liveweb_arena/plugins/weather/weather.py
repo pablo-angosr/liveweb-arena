@@ -65,10 +65,11 @@ class WeatherPlugin(BasePlugin):
             return {}
 
         data = await fetch_single_location_data(location)
-        if data:
-            # Add location key for GT collector
-            data["location"] = location
-        return data if data else {}
+        if not data:
+            raise ValueError(f"Weather API returned no data for location={location}")
+        # Add location key for GT collector
+        data["location"] = location
+        return data
 
     def _extract_location(self, url: str) -> str:
         """

@@ -185,10 +185,10 @@ Score: 1.0 for correct asset + value"""
         from liveweb_arena.core.gt_collector import get_current_gt_collector
         from liveweb_arena.plugins.weather.api_client import fetch_single_location_data
 
-        city_a = validation_info.get("city_a", {})
-        city_b = validation_info.get("city_b", {})
-        high_threshold = validation_info.get("high_diff_threshold", 15)
-        low_threshold = validation_info.get("low_diff_threshold", 5)
+        city_a = validation_info["city_a"]
+        city_b = validation_info["city_b"]
+        high_threshold = validation_info["high_diff_threshold"]
+        low_threshold = validation_info["low_diff_threshold"]
 
         # Get temperatures
         gt_collector = get_current_gt_collector()
@@ -236,15 +236,15 @@ Score: 1.0 for correct asset + value"""
         # Determine branch
         if temp_diff > high_threshold:
             branch = "high_diff"
-            asset = validation_info.get("high_diff_asset", {})
+            asset = validation_info["high_diff_asset"]
             value_type = "price"
         elif temp_diff < low_threshold:
             branch = "low_diff"
-            asset = validation_info.get("low_diff_asset", {})
+            asset = validation_info["low_diff_asset"]
             value_type = "price"
         else:
             branch = "medium"
-            asset = validation_info.get("medium_asset", {})
+            asset = validation_info["medium_asset"]
             value_type = "change"
 
         # Get asset value
@@ -304,9 +304,9 @@ Score: 1.0 for correct asset + value"""
 
         # Get all asset names
         all_assets = {
-            "high_diff": validation_info.get("high_diff_asset", {}).get("name", "").lower(),
-            "low_diff": validation_info.get("low_diff_asset", {}).get("name", "").lower(),
-            "medium": validation_info.get("medium_asset", {}).get("name", "").lower(),
+            "high_diff": validation_info["high_diff_asset"]["name"].lower(),
+            "low_diff": validation_info["low_diff_asset"]["name"].lower(),
+            "medium": validation_info["medium_asset"]["name"].lower(),
         }
 
         # Check which asset mentioned

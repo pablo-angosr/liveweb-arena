@@ -213,7 +213,9 @@ class HackerNewsCategoryComparisonTemplate(QuestionTemplate):
         category_key = f"hn_category:{category_slug}"
         if category_key in collected:
             category_data = collected[category_key]
-            stories = category_data.get("stories", {})
+            stories = category_data.get("stories")
+            if not stories:
+                return None
             for story_id, story_data in stories.items():
                 if isinstance(story_data, dict) and story_data.get("rank") == rank:
                     value = story_data.get(metric_field)

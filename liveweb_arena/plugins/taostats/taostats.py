@@ -80,7 +80,9 @@ class TaostatsPlugin(BasePlugin):
         subnet_id = self._extract_subnet_id(url)
         if subnet_id:
             data = await fetch_single_subnet_data(subnet_id)
-            return data if data else {}
+            if not data:
+                raise ValueError(f"Taostats API returned no data for subnet_id={subnet_id}")
+            return data
 
         # Homepage or subnets list - return all subnets
         if self._is_list_page(url):

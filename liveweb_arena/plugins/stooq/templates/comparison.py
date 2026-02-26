@@ -199,9 +199,9 @@ class StooqComparisonTemplate(QuestionTemplate):
 
         Returns GroundTruthResult with winner name as string.
         """
-        symbols = validation_info.get("symbols", [])
-        names = validation_info.get("names", [])
-        comparison_type = validation_info.get("comparison_type", "higher_price")
+        symbols = validation_info["symbols"]
+        names = validation_info["names"]
+        comparison_type = validation_info["comparison_type"]
 
         if not symbols or len(symbols) != len(names):
             return GroundTruthResult.fail("Invalid symbols/names configuration")
@@ -269,7 +269,7 @@ class StooqComparisonTemplate(QuestionTemplate):
         winner_name = result.value
 
         answer_lower = answer.lower()
-        names = validation_info.get("names", [])
+        names = validation_info["names"]
 
         # Check if the winning instrument is mentioned in the answer
         if winner_name.lower() in answer_lower:

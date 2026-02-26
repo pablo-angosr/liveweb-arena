@@ -145,8 +145,12 @@ class AnalysisTemplate(QuestionTemplate):
             return GroundTruthResult.fail("No GT collector")
 
         collected = gt_collector.get_collected_api_data()
-        taostats_data = collected.get("taostats", {})
-        subnets_data = taostats_data.get("subnets", {})
+        taostats_data = collected.get("taostats")
+        if not taostats_data:
+            return GroundTruthResult.fail("No taostats data collected — agent may not have visited taostats.io")
+        subnets_data = taostats_data.get("subnets")
+        if not subnets_data:
+            return GroundTruthResult.fail("No subnets data in taostats collection")
 
         if not subnets_data:
             return GroundTruthResult.fail(

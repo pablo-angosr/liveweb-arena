@@ -269,10 +269,10 @@ The agent must:
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
         """Calculate ground truth by fetching all instruments and ranking them."""
-        instruments = validation_info.get("instruments", [])
-        metric = validation_info.get("metric", "change_percent")
-        direction = validation_info.get("direction", "highest")
-        position = validation_info.get("position", "1st")
+        instruments = validation_info["instruments"]
+        metric = validation_info["metric"]
+        direction = validation_info["direction"]
+        position = validation_info["position"]
 
         if not instruments:
             return GroundTruthResult.fail("No instruments provided")

@@ -214,7 +214,9 @@ class AstronomyTemplate(QuestionTemplate):
         if data is None:
             return GroundTruthResult.fail(f"Weather data for '{location}' not collected")
 
-        weather = data.get("weather", [])
+        weather = data.get("weather")
+        if not weather:
+            return GroundTruthResult.fail("No weather data in API response")
 
         # Find day by date
         day_data = None
@@ -226,9 +228,9 @@ class AstronomyTemplate(QuestionTemplate):
         if day_data is None:
             return GroundTruthResult.fail(f"No data for date: {target_date}")
 
-        astronomy = day_data.get("astronomy", [])
+        astronomy = day_data.get("astronomy")
         if not astronomy:
-            return GroundTruthResult.fail("No astronomy data available")
+            return GroundTruthResult.fail("No astronomy data in weather forecast")
 
         astro_data = astronomy[0]
         value = astro_data.get(api_field)

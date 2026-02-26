@@ -163,8 +163,8 @@ The agent must:
 4. Identify the {direction} spread"""
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
-        instruments = validation_info.get("instruments", [])
-        direction = validation_info.get("direction", "widest")
+        instruments = validation_info["instruments"]
+        direction = validation_info["direction"]
 
         if not instruments:
             return GroundTruthResult.fail("No instruments provided")
@@ -310,8 +310,8 @@ The agent must:
 4. Identify which is closest to the daily {target}"""
 
     async def get_ground_truth(self, validation_info: Dict[str, Any]) -> GroundTruthResult:
-        instruments = validation_info.get("instruments", [])
-        direction = validation_info.get("direction", "closest_to_high")
+        instruments = validation_info["instruments"]
+        direction = validation_info["direction"]
 
         if not instruments:
             return GroundTruthResult.fail("No instruments provided")
